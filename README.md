@@ -28,6 +28,16 @@ for groupings of a) activation vectors from different layers or b) concatenation
 I'll be using the [datasets](https://github.com/sciai-lab/Truth_is_Universal/tree/main/datasets) from the 
 Truth is Universal paper.
 
+1 caveat- in the "facts" and "neg_facts" datasets, there were a total of 6 statements which put a single or double
+quote character after the period at the end of the statement. This is specific to American-English grammar and is very
+inconvenient for the data analysis (can't rely on the end of each statement being an end punctuation character).
+As a result, I swapped the order of the last 2 characters in 4 of those statements (the statements at 0-based indexes 51 and 85 in both datasets). 
+While looking at the last 2 of those statements (at 0-based index 482 in both datasets), I concluded that there was a typo:
+`The planet Mars [is/isn't] known as the Red Planet" due to its reddish appearance."`
+It doesn't make any sense to have a double quote around the phrase " due to its reddish appearance" include the space character before the word `due`.
+Therefore, I moved the terminal double quote to be the beginning of a quoted title `"Red Planet"`
+`The planet Mars [is/isn't] known as the "Red Planet" due to its reddish appearance.`
+
 #### Topics with 4 dataset variants each
 
 The following topics have all 4 variants (affirmative, negated, conjunction, disjunction):
