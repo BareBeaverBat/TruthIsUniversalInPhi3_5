@@ -11,7 +11,7 @@ after the 6th (~20%), 16th (50%), 22nd (~70%), and 29th (~90%) layers.
 I'll explore both the training of truth-and-polarity-directions on one layer at a time and the training of such 
 directions based on vectors that are the concatenation of two layers' activations.
 
-As a result, whenever a line in the following section speaks of 'a set of directions', it means 10 sets of directions 
+As a result, whenever a line in the following sections speaks of 'a set of directions', it means 10 sets of directions 
 for groupings of a) activation vectors from different layers or b) concatenations of activation vectors from a pair of layers
 - 1 set for the post-6-layer activations
 - 1 set for the post-16-layer activations
