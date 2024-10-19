@@ -1,28 +1,25 @@
 # TruthIsUniversalInPhi3_5
-Reproducing most of the findings of the "Truth is Universal" paper for Phi-3.5-mini, and testing out a few things that 
-they didn't mention trying.
+Reproducing many of the experiments of the "Truth is Universal" paper (Bürger et al.) for Phi-3.5-mini, and testing out 
+a few things that they didn't mention trying.
 
 ## Analysis Plan
 
 ### Different layers
-Out of Phi-3.5-mini's 32 'layers' (i.e. transformer decoder blocks), I'll sample the activations (the residual stream) 
-after the 6th (~20%), 16th (50%), 22nd (~70%), and 29th (~90%) layers.
+Out of Phi-3.5-mini's 32 'layers' (i.e. transformer decoder blocks), I'll retrieve the activations (the residual stream) 
+for the last token in a sequence after the embedding layer (i.e. before the first decoder block) and after every decoder block.
 
-I'll explore both the training of truth-and-polarity-directions on one layer at a time and the training of such 
-directions based on vectors that are the concatenation of two layers' activations.
+Following Bürger et al., I'll measure the 'separation' of the true and false statements for each layer's hidden states 
+(definition in caption of Figure 2 of that paper, reproduced below^).  
+I'll compute this average separation for a given layer over all datasets (rather than just 4).   
 
-As a result, whenever a line in the following sections speaks of 'a set of directions', it means 10 sets of directions 
-for groupings of a) activation vectors from different layers or b) concatenations of activation vectors from a pair of layers
-- 1 set for the post-6-layer activations
-- 1 set for the post-16-layer activations
-- 1 set for the post-22-layer activations
-- 1 set for the post-29-layer activations
-- 1 set for the post-6 + post-16 activations
-- 1 set for the post-6 + post-22 activations
-- 1 set for the post-6 + post-29 activations
-- 1 set for the post-16 + post-22 activations
-- 1 set for the post-16 + post-29 activations
-- 1 set for the post-22 + post-29 activations.
+If I find a single-peak pattern as they did, I'll only train truth-and-polarity directions on that peak layer.
+
+If I find a multi-peak pattern (even if there's one clear global peak), I'll train truth-and-polarity directions on each peak layer and on pairwise combinations of peak layers.  
+The rationale for the pairwise combinations of the global peak layer and a local peak layer is that representations tend to vary in abstractness as one passes through the layers, and I have an intuition that it might be useful to combine both very-high-abstraction representations and medium-abstraction representations when linear-probing for polarity and truth directions.  
+
+
+
+^Ratio of the between-class variance and within-class variance of activations corresponding to true and false statements, across residual stream layers, averaged over all dimensions of the respective layer
 
 ### Datasets usage
 I'll be using the [datasets](https://github.com/sciai-lab/Truth_is_Universal/tree/main/datasets) from the 
@@ -30,12 +27,12 @@ Truth is Universal paper.
 
 1 caveat- in the "facts" and "neg_facts" datasets, there were a total of 6 statements which put a single or double
 quote character after the period at the end of the statement. This is specific to American-English grammar and is very
-inconvenient for the data analysis (can't rely on the end of each statement being an end punctuation character).
+inconvenient for the data analysis (can't rely on the end of each statement being an end punctuation character).  
 As a result, I swapped the order of the last 2 characters in 4 of those statements (the statements at 0-based indexes 51 and 85 in both datasets). 
-While looking at the last 2 of those statements (at 0-based index 482 in both datasets), I concluded that there was a typo:
-`The planet Mars [is/isn't] known as the Red Planet" due to its reddish appearance."`
+While looking at the last 2 of those statements (at 0-based index 482 in both datasets), I concluded that there was a typo:  
+`The planet Mars [is/isn't] known as the Red Planet" due to its reddish appearance."`  
 It doesn't make any sense to have a double quote around the phrase " due to its reddish appearance" include the space character before the word `due`.
-Therefore, I moved the terminal double quote to be the beginning of a quoted title `"Red Planet"`
+Therefore, I moved the terminal double quote to be the beginning of a quoted title `"Red Planet"`  
 `The planet Mars [is/isn't] known as the "Red Planet" due to its reddish appearance.`
 
 #### Topics with 4 dataset variants each
