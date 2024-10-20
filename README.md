@@ -47,7 +47,7 @@ The following topics have all 4 variants (affirmative, negated, conjunction, dis
 
 Following the paper, I'll train 
 - a set of directions for each topic's affirmative statements
-- a set of directions for each topics affirmative and negated statements
+- a set of directions for each topic's affirmative and negated statements
 - a set of directions on all 4 variants of a topic's statements
 
 and I'll also train
