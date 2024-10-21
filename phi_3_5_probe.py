@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,13 +8,20 @@ import torch.optim as optim
 import tqdm
 from scipy.optimize import least_squares
 
+from logging_setup import create_logger, StdoutToLoggerRedirection
 from phi_3_5_constants import hidden_state_size, device
 
-def is_bipolar(labels: torch.Tensor) -> bool:
-    return torch.all(torch.abs(labels) == 1).item()
+logger = create_logger(__name__)
 
-def is_binary(labels: torch.Tensor) -> bool:
-    return torch.all((labels == 1) | (labels == 0)).item()
+
+def is_bipolar(labels: torch.Tensor | NDArray) -> bool:
+    abs_vals = labels.abs() if isinstance(labels, torch.Tensor) else abs(labels)
+    result = (abs_vals == 1).all()
+    return result.item() if isinstance(result, torch.Tensor) else result
+
+def is_binary(labels: torch.Tensor | NDArray) -> bool:
+    result = ((labels == 1) | (labels == 0)).all()
+    return result.item() if isinstance(result, torch.Tensor) else result
 
 
 class PolarityAwareTruthProbe(nn.Module):
@@ -59,7 +68,7 @@ def solve_for_truth_polarity_vectors(
     assert centered_activations_data.shape[0] == truth_labels.shape[0] == polarity_labels.shape[0]
     vector_size = centered_activations_data.shape[1]
     if vector_size % hidden_state_size != 0:
-        print(f"NOTE- not using phi 3.5 mini because vector size {vector_size} is wrong")
+        logger.warning(f"NOTE- not using phi 3.5 mini because vector size {vector_size} is wrong")
     assert 1 == truth_labels.shape[1] == polarity_labels.shape[1]
     assert is_bipolar(truth_labels), "Not all truth labels are 1 or -1"
     assert is_bipolar(polarity_labels), "Not all polarity labels are 1 or -1"
@@ -74,11 +83,18 @@ def solve_for_truth_polarity_vectors(
         loss = np.sum(np.square(np.linalg.norm(centered_activations_data - guess_at_centered_data, axis=1)))
         return loss
     
-    ols_result = least_squares(loss_fun, init_truth_and_polarity_vects)
+    start_of_ols_ts = time.time()
+    logger.debug("starting OLS for truth/polarity directions")
+    with StdoutToLoggerRedirection(logger):
+        ols_result = least_squares(loss_fun, init_truth_and_polarity_vects, verbose=2)
+    num_secs_running_ols = time.time() - start_of_ols_ts
+    logger.debug(f"OLS for truth/polarity directions finished after {num_secs_running_ols // 60} min, {num_secs_running_ols % 60:.3f} sec")
+    
     if not ols_result['success']:
-        print(f"problem while solving for truth and polarity directions: {ols_result['message']}")
+        logger.error(f"problem while solving for truth and polarity directions: {ols_result['message']}")
         raise RuntimeError(f"Scipy OLS didn't converge; {ols_result['status']}: {ols_result['message']}")
     final_truth_and_polarity_vects: NDArray = ols_result['x']
+    final_truth_and_polarity_vects = final_truth_and_polarity_vects.astype(np.float32)
     return (torch.from_numpy(final_truth_and_polarity_vects[0:vector_size, np.newaxis]),
             torch.from_numpy(final_truth_and_polarity_vects[vector_size:2*vector_size, np.newaxis]))
 
@@ -101,7 +117,7 @@ def learn_directions_and_train_probe(
     :return:
     """
     assert (2 == train_activations.ndim == val_activations.ndim == train_truth_labels.ndim == train_polarity_labels.ndim
-            == val_truth_labels.ndim)
+            == val_truth_labels.ndim), f"all ndims should be 2; actually: train_activations={train_activations.ndim}, val_activations={val_activations.ndim}, train_truth_labels={train_truth_labels.ndim}, train_polarity_labels={train_polarity_labels.ndim}, val_truth_labels={val_truth_labels.ndim}"
     assert 1 == train_truth_labels.shape[1] == train_polarity_labels.shape[1] == val_truth_labels.shape[1]
     num_train = train_activations.shape[0]
     assert num_train == train_truth_labels.shape[0] == train_polarity_labels.shape[0]
@@ -111,7 +127,7 @@ def learn_directions_and_train_probe(
     activ_vect_size = train_activations.shape[1]
     assert activ_vect_size == val_activations.shape[1]
     if activ_vect_size % hidden_state_size != 0:
-        print(f"NOTE- not using phi 3.5 mini because activation vector size {activ_vect_size} is wrong")
+        logger.warning(f"NOTE- not using phi 3.5 mini because activation vector size {activ_vect_size} is wrong")
     num_val = val_activations.shape[0]
     assert num_val == val_truth_labels.shape[0]
     
@@ -131,9 +147,9 @@ def learn_directions_and_train_probe(
     gpu_val_labels = val_truth_labels.to(device)
     
     loss_fn = nn.BCELoss()
-    optimizer = optim.AdamW(truth_probe.parameters(), lr=0.0001, weight_decay=0.001)
+    optimizer = optim.AdamW(truth_probe.parameters(), lr=0.000125, weight_decay=0.01)
     
-    n_epochs = 256   # number of epochs to run
+    n_epochs = 65_536   # number of epochs to run
     batch_size = 64  # size of each batch
     batch_start = torch.arange(0, num_train, batch_size).to(device)
     
@@ -142,7 +158,9 @@ def learn_directions_and_train_probe(
     best_weights = None
     best_bias = None
     
-    
+    prev_loss = np.inf
+    probe_train_start_ts = time.time()
+    logger.debug(f"starting to train probe on dataset of size {num_train} with validation set of size {num_val}")
     for epoch in range(n_epochs):
         truth_probe.train()
         with tqdm.tqdm(batch_start, unit="batch", mininterval=0, disable=True) as bar:
@@ -163,6 +181,9 @@ def learn_directions_and_train_probe(
             preds = truth_probe(gpu_val_activs)
             val_loss = loss_fn(preds, gpu_val_labels).item()
             val_acc = (preds.round() == gpu_val_labels).float().mean().item()
+            
+        is_better = val_loss < prev_loss
+        prev_loss = val_loss
         
         is_new_best = val_loss < best_loss
         if is_new_best:
@@ -170,8 +191,13 @@ def learn_directions_and_train_probe(
             best_epoch = epoch
             best_weights = truth_probe.output_w.weight.clone().detach().cpu()
             best_bias = truth_probe.output_w.bias.clone().detach().cpu()
+            
+            if epoch > 100 and val_loss < 1e-10:
+                logger.info(f"stopping early at epoch {epoch}!")
+                break
         
-        print(f"{'! ' if is_new_best else ''}Epoch {epoch}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
+        logger.info(f"{'!!! ' if is_new_best else ('< ' if is_better else '')
+        }Epoch {epoch}: Val Loss: {val_loss:.10f}, Val Acc: {val_acc:.8f}")
     
     # restore truth_probe to use weights that resulted in best validation loss
     truth_probe.output_w.weight.data.copy_(best_weights.to(device))
@@ -184,5 +210,6 @@ def learn_directions_and_train_probe(
         final_val_loss = loss_fn(preds, gpu_val_labels).item()
         final_val_acc = (preds.round() == gpu_val_labels).float().mean().item()
     
-    print(f"Using best Epoch {best_epoch}: Final Val Loss: {final_val_loss:.4f}, Final Val Acc: {final_val_acc:.4f}")
+    logger.info(f"Using best Epoch {best_epoch}: Final Val Loss: {final_val_loss:.8f}, Final Val Acc: {final_val_acc:.8f};\n"
+                f"Training took {time.time() - probe_train_start_ts:.3f} sec")
     return truth_probe
