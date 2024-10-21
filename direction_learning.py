@@ -1,0 +1,162 @@
+import time
+from dataclasses import dataclass, asdict
+from pathlib import Path
+
+import numpy as np
+import torch
+from numpy.typing import NDArray
+from scipy.optimize import least_squares
+
+from logging_setup import StdoutToLoggerRedirection, create_logger
+from phi_3_5_constants import hidden_state_size
+from phi_3_5_probe import is_binary
+
+logger = create_logger(__name__)
+
+@dataclass
+class DirVectors:
+    lyr18_mean_activ: torch.Tensor
+    lyr18_truth_dir: torch.Tensor
+    lyr18_polarity_dir: torch.Tensor
+    lyr25_mean_activ: torch.Tensor
+    lyr25_truth_dir: torch.Tensor
+    lyr25_polarity_dir: torch.Tensor
+    lyrs18_and_25_mean_activ: torch.Tensor
+    lyrs18_and_25_truth_dir: torch.Tensor
+    lyrs18_and_25_polarity_dir: torch.Tensor
+    
+    def __post_init__(self):
+        if not (self.lyr18_mean_activ.ndim == self.lyr18_truth_dir.ndim == self.lyr18_polarity_dir.ndim
+                == self.lyr25_mean_activ.ndim == self.lyr25_truth_dir.ndim == self.lyr25_polarity_dir.ndim
+                == self.lyrs18_and_25_mean_activ.ndim == self.lyrs18_and_25_truth_dir.ndim
+                == self.lyrs18_and_25_polarity_dir.ndim):
+            raise ValueError(f"all entries should be column-vector-type matrices with 2 entries in the pytorch tensor's shape, but instead: self.lyr18_mean_activ.ndim={self.lyr18_mean_activ.ndim}; self.lyr18_truth_dir.ndim={self.lyr18_truth_dir.ndim} ; self.lyr18_polarity_dir.ndim={self.lyr18_polarity_dir.ndim}; self.lyr25_mean_activ.ndim={self.lyr25_mean_activ.ndim}; self.lyr25_truth_dir.ndim={self.lyr25_truth_dir.ndim}; self.lyr25_polarity_dir.ndim={self.lyr25_polarity_dir.ndim}; self.lyrs18_and_25_mean_activ.ndim={self.lyrs18_and_25_mean_activ.ndim}; self.lyrs18_and_25_truth_dir.ndim={self.lyrs18_and_25_truth_dir.ndim}; self.lyrs18_and_25_polarity_dir.ndim={self.lyrs18_and_25_polarity_dir.ndim}")
+        if not (1 == self.lyr18_mean_activ.shape[1] == self.lyr18_truth_dir.shape[1] == self.lyr18_polarity_dir.shape[1]
+                == self.lyr25_mean_activ.shape[1] == self.lyr25_truth_dir.shape[1] == self.lyr25_polarity_dir.shape[1]
+                == self.lyrs18_and_25_mean_activ.shape[1] == self.lyrs18_and_25_truth_dir.shape[1]
+                == self.lyrs18_and_25_polarity_dir.shape[1]):
+            raise ValueError(f"all entries should be column-vector-type matrices, but instead their second dimension's size is: self.lyr18_mean_activ.shape[1]={self.lyr18_mean_activ.shape[1]}; self.lyr18_truth_dir.shape[1]={self.lyr18_truth_dir.shape[1]} ; self.lyr18_polarity_dir.shape[1]={self.lyr18_polarity_dir.shape[1]}; self.lyr25_mean_activ.shape[1]={self.lyr25_mean_activ.shape[1]}; self.lyr25_truth_dir.shape[1]={self.lyr25_truth_dir.shape[1]}; self.lyr25_polarity_dir.shape[1]={self.lyr25_polarity_dir.shape[1]}; self.lyrs18_and_25_mean_activ.shape[1]={self.lyrs18_and_25_mean_activ.shape[1]}; self.lyrs18_and_25_truth_dir.shape[1]={self.lyrs18_and_25_truth_dir.shape[1]}; self.lyrs18_and_25_polarity_dir.shape[1]={self.lyrs18_and_25_polarity_dir.shape[1]}")
+        if not (self.lyr18_mean_activ.shape[0] == self.lyr18_truth_dir.shape[0] == self.lyr18_polarity_dir.shape[0]
+                == self.lyr25_mean_activ.shape[0] == self.lyr25_truth_dir.shape[0] == self.lyr25_polarity_dir.shape[0]):
+            raise ValueError(f"all vectors for single-layer scenarios should have same length, but instead their first dimension's size is: self.lyr18_mean_activ.shape[0]={self.lyr18_mean_activ.shape[0]}; self.lyr18_truth_dir.shape[0]={self.lyr18_truth_dir.shape[0]} ; self.lyr18_polarity_dir.shape[0]={self.lyr18_polarity_dir.shape[0]}; self.lyr25_mean_activ.shape[0]={self.lyr25_mean_activ.shape[0]}; self.lyr25_truth_dir.shape[0]={self.lyr25_truth_dir.shape[0]}; self.lyr25_polarity_dir.shape[0]={self.lyr25_polarity_dir.shape[0]}")
+        if not (self.lyrs18_and_25_mean_activ.shape[0] == self.lyrs18_and_25_truth_dir.shape[0]
+                == self.lyrs18_and_25_polarity_dir.shape[0]):
+            raise ValueError(f"all vectors for double-layer scenarios should have same length, but instead their first dimension's size is: self.lyrs18_and_25_mean_activ.shape[0]={self.lyrs18_and_25_mean_activ.shape[0]}; self.lyrs18_and_25_truth_dir.shape[0]={self.lyrs18_and_25_truth_dir.shape[0]}; self.lyrs18_and_25_polarity_dir.shape[0]={self.lyrs18_and_25_polarity_dir.shape[0]}")
+
+@dataclass
+class VariantCombosInTopic:
+    affirm_neg: DirVectors
+    affirm_disj: DirVectors
+    neg_conj: DirVectors
+    affirm_neg_conj_disj: DirVectors
+
+def is_bipolar(labels: torch.Tensor | NDArray) -> bool:
+    abs_vals = labels.abs() if isinstance(labels, torch.Tensor) else abs(labels)
+    result = (abs_vals == 1).all()
+    return result.item() if isinstance(result, torch.Tensor) else result
+
+def solve_for_truth_polarity_vectors(
+        centered_activations_data: torch.Tensor, truth_labels: torch.Tensor, polarity_labels: torch.Tensor,
+        np_rng: np.random.Generator) -> (torch.Tensor, torch.Tensor):
+    """
+    
+    :param centered_activations_data: this should already have had an appropriate "average activations" vector subtracted from it
+    :param truth_labels:
+    :param polarity_labels:
+    :param np_rng:
+    :return: tuple of truth vector and polarity vector
+    """
+    assert 2 == centered_activations_data.ndim == truth_labels.ndim == polarity_labels.ndim
+    assert centered_activations_data.shape[0] == truth_labels.shape[0] == polarity_labels.shape[0]
+    vector_size = centered_activations_data.shape[1]
+    if vector_size % hidden_state_size != 0:
+        logger.warning(f"NOTE- not using phi 3.5 mini because vector size {vector_size} is wrong")
+    assert 1 == truth_labels.shape[1] == polarity_labels.shape[1]
+    assert is_bipolar(truth_labels), "Not all truth labels are 1 or -1"
+    assert is_bipolar(polarity_labels), "Not all polarity labels are 1 or -1"
+    
+    #this has to have shape (n,) rather than (n,1) because of scipy
+    init_truth_and_polarity_vects = np_rng.normal(size=(2*vector_size,))
+    
+    def loss_fun(truth_and_polarity_vect_values: NDArray)-> float:
+        truth_dir = truth_and_polarity_vect_values[0:vector_size, np.newaxis]
+        polarity_dir = truth_and_polarity_vect_values[vector_size:2*vector_size, np.newaxis]
+        guess_at_centered_data = truth_labels @ truth_dir.T + (truth_labels * polarity_labels) @ polarity_dir.T
+        loss = np.sum(np.square(np.linalg.norm(centered_activations_data - guess_at_centered_data, axis=1)))
+        return loss
+    
+    start_of_ols_ts = time.time()
+    logger.debug("starting OLS for truth/polarity directions")
+    with StdoutToLoggerRedirection(logger):
+        ols_result = least_squares(loss_fun, init_truth_and_polarity_vects, verbose=2)
+    num_secs_running_ols = time.time() - start_of_ols_ts
+    logger.debug(f"OLS for truth/polarity directions finished after {num_secs_running_ols // 60} min, {num_secs_running_ols % 60:.3f} sec")
+    
+    if not ols_result['success']:
+        logger.error(f"problem while solving for truth and polarity directions: {ols_result['message']}")
+        raise RuntimeError(f"Scipy OLS didn't converge; {ols_result['status']}: {ols_result['message']}")
+    final_truth_and_polarity_vects: NDArray = ols_result['x']
+    final_truth_and_polarity_vects = final_truth_and_polarity_vects.astype(np.float32)
+    return (torch.from_numpy(final_truth_and_polarity_vects[0:vector_size, np.newaxis]),
+            torch.from_numpy(final_truth_and_polarity_vects[vector_size:2*vector_size, np.newaxis]))
+
+def learn_directions_for_dset(
+        output_folder: Path, output_nm_prefix: str, train_activs: torch.Tensor, train_truth_labels: torch.Tensor,
+        train_polarity_labels, np_rng: np.random.Generator
+) -> DirVectors:
+    assert 3 == train_activs.ndim
+    assert 2 == train_activs.shape[0]
+    assert 2 == train_truth_labels.ndim == train_polarity_labels.ndim
+    assert 1 == train_truth_labels.shape[1] == train_polarity_labels.shape[1]
+    num_train_records = train_activs.shape[1]
+    assert num_train_records == train_truth_labels.shape[0] == train_polarity_labels.shape[0]
+    assert is_bipolar(train_polarity_labels)
+    assert is_binary(train_truth_labels)
+    activs_size = train_activs.shape[2]
+    if activs_size != hidden_state_size:
+        logger.warning(f"dataset of activations isn't from phi 3.5 mini because activation size {activs_size} is wrong")
+    
+    output_folder.mkdir(exist_ok=True)
+    
+    logger.debug(f"doing direction-learning for layer 18 for data {output_nm_prefix} in the location {output_folder}")
+    
+    train_bipolar_truth_labels = train_truth_labels.clone()
+    train_bipolar_truth_labels[train_bipolar_truth_labels == 0] = -1
+    
+    lyr18_train_activs = train_activs[0, :, :]
+    lyr18_mean_train_activ = lyr18_train_activs.mean(dim=0, keepdim=True).T
+    assert lyr18_mean_train_activ.shape == (activs_size, 1)
+    lyr18_centered_train_activs = lyr18_train_activs - lyr18_mean_train_activ.T
+    assert lyr18_centered_train_activs.shape == (num_train_records, activs_size)
+    lyr18_truth_dir, lyr18_polarity_dir = solve_for_truth_polarity_vectors(
+        lyr18_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+    
+    logger.debug(f"doing direction-learning for layer 25 for data {output_nm_prefix} in the location {output_folder}")
+    lyr25_train_activs = train_activs[1, :, :]
+    lyr25_mean_train_activ = lyr25_train_activs.mean(dim=0, keepdim=True).T
+    assert lyr25_mean_train_activ.shape == (activs_size, 1)
+    lyr25_centered_train_activs = lyr25_train_activs - lyr25_mean_train_activ.T
+    assert lyr25_centered_train_activs.shape == (num_train_records, activs_size)
+    lyr25_truth_dir, lyr25_polarity_dir = solve_for_truth_polarity_vectors(
+        lyr25_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+    
+    logger.debug(f"doing direction-learning for layers 18 & 25 for data {output_nm_prefix} in the location {output_folder}")
+    lyrs18_and_25_mean_train_activ = torch.concat((lyr18_mean_train_activ, lyr25_mean_train_activ), dim=0)
+    assert lyr25_mean_train_activ.shape == (2*activs_size, 1)
+    lyrs18_and_25_centered_train_activs = torch.concat(
+        (lyr18_centered_train_activs, lyr25_centered_train_activs), dim=1)
+    assert lyr25_centered_train_activs.shape == (num_train_records, 2*activs_size)
+    
+    lyrs18_and_25_truth_dir, lyrs18_and_25_polarity_dir = solve_for_truth_polarity_vectors(
+        lyrs18_and_25_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+    
+    vectors = DirVectors(lyr18_mean_activ=lyr18_mean_train_activ, lyr18_truth_dir=lyr18_truth_dir,
+                         lyr18_polarity_dir=lyr18_polarity_dir, lyr25_mean_activ=lyr25_mean_train_activ,
+                         lyr25_truth_dir=lyr25_truth_dir, lyr25_polarity_dir=lyr25_polarity_dir,
+                         lyrs18_and_25_mean_activ=lyrs18_and_25_mean_train_activ,
+                         lyrs18_and_25_truth_dir=lyrs18_and_25_truth_dir,
+                         lyrs18_and_25_polarity_dir=lyrs18_and_25_polarity_dir)
+    
+    torch.save(asdict(vectors), output_folder / f"{output_nm_prefix}.pt")
+    
+    return vectors

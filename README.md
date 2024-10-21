@@ -77,10 +77,6 @@ There are also these datasets which don't follow the 4-variants pattern.
 For 'real world scenarios', I'll train a set of directions on "unambiguous lie", "unambiguous truthful reply", and 
 "ambiguous truthful reply", leaving "ambiguous lie" and "honest reply despite incentive to lie" as a test set.
 
-For 'true false', I'll train a set of directions on "common claim" and test them on "counterfactual".
-
-For relative comparison, I'll train a set of directions on "smaller than" and test them on "larger than".
-
 Finally, I'll train a set of truth directions on all of 
 - affirmative and negated statements from "animal class", "element symbols", "facts", and "inventors"
 - "unambiguous lie", "unambiguous truthful reply", and "ambiguous truthful reply" from 'real world scenarios'
