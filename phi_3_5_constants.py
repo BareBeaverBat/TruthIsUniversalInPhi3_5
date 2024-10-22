@@ -19,5 +19,6 @@ directions_results_folder = Path("learned_vectors")
 finalized_activations_dir = Path("D:\\TruthIsUniversal_In_Phi_3_5_Mini\\best2_layers_activations_for_final_token_of_sequences")
 dsets_index_path = dsets_folder / "datasets_index.csv"
 
+misc_datasets_index_path = dsets_folder / "misc_dsets_index.json"
 four_way_topics_index_path = dsets_folder / "four_way_dsets_index.json"
 
