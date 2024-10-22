@@ -13,6 +13,7 @@ from phi_3_5_probe import is_binary
 
 logger = create_logger(__name__)
 
+
 @dataclass
 class DirVectors:
     lyr18_mean_activ: torch.Tensor
@@ -117,8 +118,15 @@ def learn_directions_for_dset(
         logger.warning(f"dataset of activations isn't from phi 3.5 mini because activation size {activs_size} is wrong")
     
     output_folder.mkdir(exist_ok=True)
+
+    save_location = output_folder / f"{output_nm_prefix}.pt"
+    if save_location.exists():
+        logger.info(f"skipping direction-learning for {num_train_records} records of data {output_nm_prefix} in the location {output_folder} because the file {save_location} already exists")
+        tensors_dict = torch.load(save_location, weights_only=True)
+        assert isinstance(tensors_dict, dict)
+        return DirVectors(**tensors_dict)
     
-    logger.debug(f"doing direction-learning for layer 18 for data {output_nm_prefix} in the location {output_folder}")
+    logger.debug(f"doing direction-learning for layer 18 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
     
     train_bipolar_truth_labels = train_truth_labels.clone()
     train_bipolar_truth_labels[train_bipolar_truth_labels == 0] = -1
@@ -131,7 +139,7 @@ def learn_directions_for_dset(
     lyr18_truth_dir, lyr18_polarity_dir = solve_for_truth_polarity_vectors(
         lyr18_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
     
-    logger.debug(f"doing direction-learning for layer 25 for data {output_nm_prefix} in the location {output_folder}")
+    logger.debug(f"doing direction-learning for layer 25 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
     lyr25_train_activs = train_activs[1, :, :]
     lyr25_mean_train_activ = lyr25_train_activs.mean(dim=0, keepdim=True).T
     assert lyr25_mean_train_activ.shape == (activs_size, 1)
@@ -140,12 +148,12 @@ def learn_directions_for_dset(
     lyr25_truth_dir, lyr25_polarity_dir = solve_for_truth_polarity_vectors(
         lyr25_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
     
-    logger.debug(f"doing direction-learning for layers 18 & 25 for data {output_nm_prefix} in the location {output_folder}")
+    logger.debug(f"doing direction-learning for layers 18 & 25 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
     lyrs18_and_25_mean_train_activ = torch.concat((lyr18_mean_train_activ, lyr25_mean_train_activ), dim=0)
-    assert lyr25_mean_train_activ.shape == (2*activs_size, 1)
+    assert lyrs18_and_25_mean_train_activ.shape == (2*activs_size, 1)
     lyrs18_and_25_centered_train_activs = torch.concat(
         (lyr18_centered_train_activs, lyr25_centered_train_activs), dim=1)
-    assert lyr25_centered_train_activs.shape == (num_train_records, 2*activs_size)
+    assert lyrs18_and_25_centered_train_activs.shape == (num_train_records, 2*activs_size)
     
     lyrs18_and_25_truth_dir, lyrs18_and_25_polarity_dir = solve_for_truth_polarity_vectors(
         lyrs18_and_25_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
@@ -156,7 +164,7 @@ def learn_directions_for_dset(
                          lyrs18_and_25_mean_activ=lyrs18_and_25_mean_train_activ,
                          lyrs18_and_25_truth_dir=lyrs18_and_25_truth_dir,
                          lyrs18_and_25_polarity_dir=lyrs18_and_25_polarity_dir)
-    
-    torch.save(asdict(vectors), output_folder / f"{output_nm_prefix}.pt")
+
+    torch.save(asdict(vectors), save_location)
     
     return vectors
