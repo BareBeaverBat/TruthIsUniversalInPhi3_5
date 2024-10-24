@@ -15,9 +15,9 @@ from logging_setup import create_logger
 from phi_3_5_constants import hidden_state_size, device
 from utils import is_binary
 
-weight_decay_optimizer_param_key = 'weight_decay'
+weight_decay_key = 'weight_decay'
 
-learn_rate_optimizer_param_key = 'lr'
+learn_rate_key = 'lr'
 
 logger = create_logger(__name__)
 
@@ -55,14 +55,16 @@ class ProbesForDataset:
     lyr25_probe: PolarityAwareTruthProbe
     lyrs18_and_25_probe: PolarityAwareTruthProbe    
 
+def get_optimizer_val(optimizer: torch.optim.Optimizer, param_key: str):
+    return optimizer.param_groups[0][param_key]
 
 def scale_lr_by(optimizer: torch.optim.Optimizer, factor: float):
     for param_group in optimizer.param_groups:
-        param_group[learn_rate_optimizer_param_key] = factor * param_group[learn_rate_optimizer_param_key]
+        param_group[learn_rate_key] = factor * param_group[learn_rate_key]
 
 def shift_weight_decay_by(optimizer: torch.optim.Optimizer, offset: float):
     for param_group in optimizer.param_groups:
-        param_group[weight_decay_optimizer_param_key] = offset + param_group[weight_decay_optimizer_param_key]
+        param_group[weight_decay_key] = offset + param_group[weight_decay_key]
 
 def train_probe(
         train_activations: torch.Tensor, train_truth_labels: torch.Tensor, val_activations: torch.Tensor,
@@ -125,12 +127,12 @@ def train_probe(
     
     # keep training time from getting out of hand for the big datasets
     #  for context, many are 500 or less, a couple are 2k, one is ~4.5k, and one is ~22k
-    epoch_shrinkage_factor = 1
-    if num_train > 500:
-        dataset_size_ratio = num_train//500
-        epoch_shrinkage_factor = min(128, 2**math.floor(math.log2(dataset_size_ratio)))
+    # epoch_shrinkage_factor = 1
+    # if num_train > 500:
+    #     dataset_size_ratio = num_train//500
+    #     epoch_shrinkage_factor = min(128, 2**math.floor(math.log2(dataset_size_ratio)))
     
-    n_epochs = 65_536//epoch_shrinkage_factor   # number of epochs to run
+    n_epochs = 1_048_576#//epoch_shrinkage_factor   # number of epochs to run
     
     batch_size = 64*batch_size_factor
     batch_start = torch.arange(0, num_train, batch_size).to(device)
@@ -146,15 +148,29 @@ def train_probe(
     num_prev_losses_tracked=10
     prev_few_losses = np.array([np.inf]*num_prev_losses_tracked)
     position_in_prev_losses= 0#rotary buffer
-    val_loss_msgs_for_millenium: list[str] = []
+    val_loss_msgs_for_epoch_group: list[str] = []
     
-    prev_millenium_loss = np.inf
-    num_stalls_in_millenium = 0
+    prev_epoch_group_loss = np.inf
+    num_stalls_in_epoch_group = 0
     
-    num_epochs_in_millenium = 1024//epoch_shrinkage_factor
+    num_epochs_in_group = 1024#//epoch_shrinkage_factor
+    
+    #for larger epoch numbers, this will be displayed without softwrap in notepad++ on my laptop ~only if few < or ! prefixes on epoch losses, making epochs with those prefixes stand out more
+    num_epoch_losses_per_log_line=7
+    
+    def print_epoch_group_losses(latest_epoch: int):
+        log_msg_for_epoch_group = f"Val losses for {len(val_loss_msgs_for_epoch_group)} epochs up to epoch {latest_epoch}:\n"
+        for line_idx in range(0, len(val_loss_msgs_for_epoch_group), num_epoch_losses_per_log_line):
+            max_epoch_idx_in_line = line_idx + num_epoch_losses_per_log_line
+            log_msg_for_epoch_group += '; '.join(val_loss_msgs_for_epoch_group[line_idx:max_epoch_idx_in_line])
+            if max_epoch_idx_in_line < len(val_loss_msgs_for_epoch_group):
+                log_msg_for_epoch_group += '\n'
+        logger.debug(log_msg_for_epoch_group)
+        val_loss_msgs_for_epoch_group.clear()
     
     probe_train_start_ts = time.time()
     logger.debug(f"starting to train probe on dataset of size {num_train} with validation set of size {num_val}")
+    epoch=0
     for epoch in range(n_epochs):
         truth_probe.train()
         with tqdm.tqdm(batch_start, unit="batch", mininterval=0, disable=True) as bar:
@@ -181,38 +197,37 @@ def train_probe(
         
         is_new_best = val_loss < best_loss
         
-        val_loss_msgs_for_millenium.append(f"{'! ' if is_new_best else ('< ' if is_better else '')
-        }{epoch}: {val_loss:.12f}")
-        
+        val_loss_msgs_for_epoch_group.append(f"{'! ' if is_new_best else ('<' if is_better else '')
+        }{epoch}:{val_loss:.7e}")
         if not is_better:
-            num_stalls_in_millenium += 1
+            num_stalls_in_epoch_group += 1
         
-        if epoch and epoch % num_epochs_in_millenium == 0:
-            log_msg_for_millenium = f"Val losses for {num_epochs_in_millenium} epochs up to epoch {epoch}:\n"
-            for i in range(0, num_epochs_in_millenium, 10):
-                log_msg_for_millenium += '; '.join(val_loss_msgs_for_millenium[i:i+10]) + '\n'
-            logger.debug(log_msg_for_millenium)
-            val_loss_msgs_for_millenium = []
+        if epoch and epoch % num_epochs_in_group == 0:
+            print_epoch_group_losses(epoch)
             
             curr_avg_loss = np.mean(prev_few_losses)
-            if epoch > 3*num_epochs_in_millenium:
-                if curr_avg_loss >= prev_millenium_loss:
-                    logger.warning(f"shrinking learning rate at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) hasn't improved since {num_epochs_in_millenium} epochs ago")
-                    scale_lr_by(optimizer, 0.707)
-                if num_stalls_in_millenium > 0.4*num_epochs_in_millenium:
-                    if optimizer.param_groups[0][weight_decay_optimizer_param_key] < 0.1:
-                        logger.warning(f"increasing weight decay at epoch {epoch} because (over last {num_prev_losses_tracked} timesteps) validation loss hasn't even been close to improving smoothly- more than 40% of the last {num_epochs_in_millenium} epochs have been stagnant")
+            loss_delta_over_group = curr_avg_loss - prev_epoch_group_loss
+            if epoch > 3*num_epochs_in_group:
+                if num_stalls_in_epoch_group > 0.7*num_epochs_in_group:
+                    if optimizer.param_groups[0][weight_decay_key] < 0.2:
+                        logger.warning(f"increasing weight decay from {get_optimizer_val(optimizer, weight_decay_key):e} at epoch {epoch} because (over last {num_epochs_in_group} timesteps) validation loss hasn't even been close to improving smoothly- more than 40% of the last {num_epochs_in_group} epochs have been stagnant")
                         shift_weight_decay_by(optimizer, 0.005)
-                    elif curr_avg_loss >= prev_millenium_loss:
-                        logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) hasn't improved since {num_epochs_in_millenium} epochs ago and there have been so many mostly stagnant periods that the weight decay has already been increased to its maximum")
+                    elif loss_delta_over_group >= 0:
+                        logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods in earlier epoch groups that the weight decay has already been increased to its maximum")
                         break
+                    else:
+                        logger.info(f"at epoch {epoch}, last {num_epochs_in_group} epochs had a lot of stalls and weight decay has already been boosted to its maximum, but loss has improved by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago, so continuing")
+                if loss_delta_over_group >= 0:
+                    logger.warning(f"shrinking learning rate from {get_optimizer_val(optimizer, learn_rate_key):e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago")
+                    scale_lr_by(optimizer, 0.707)
+
             
-            if curr_avg_loss < prev_millenium_loss and num_stalls_in_millenium < 50:
-                logger.info(f"scaling learning rate up at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {prev_millenium_loss-curr_avg_loss:.16f} since {num_epochs_in_millenium} epochs ago and last {num_epochs_in_millenium} epochs have not included any stagnant or backsliding epochs")
+            if loss_delta_over_group < 0 and num_stalls_in_epoch_group < 50:
+                logger.info(f"scaling learning rate up from {get_optimizer_val(optimizer, learn_rate_key):e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and last {num_epochs_in_group} epochs have included a minimal number of stagnant or backsliding epochs")
                 scale_lr_by(optimizer, 1.2)
             
-            prev_millenium_loss = curr_avg_loss
-            num_stalls_in_millenium = 0
+            prev_epoch_group_loss = curr_avg_loss
+            num_stalls_in_epoch_group = 0
         
         if is_new_best:
             best_loss = val_loss
@@ -220,16 +235,12 @@ def train_probe(
             best_weights = truth_probe.output_w.weight.clone().detach().cpu()
             best_bias = truth_probe.output_w.bias.clone().detach().cpu()
             
-            if epoch > 100 and val_loss < 1e-10:
+            if epoch > 100 and val_loss < 1e-14:
+                print_epoch_group_losses(epoch)
                 logger.info(f"stopping early at epoch {epoch}!")
                 break
         
         # logger.debug(f"{'!!! ' if is_new_best else ('< ' if is_better else '')}Epoch {epoch}: Val Loss: {val_loss:.16f}, Val Acc: {val_acc:.2f}")
-    
-    log_msg_for_last_millenium = f"Val losses for {num_epochs_in_millenium} epochs up to final epoch:\n"
-    for i in range(0, num_epochs_in_millenium, 10):
-        log_msg_for_last_millenium += '; '.join(val_loss_msgs_for_millenium[i:i+10]) + '\n'
-    logger.debug(log_msg_for_last_millenium)
     
     # restore truth_probe to use weights that resulted in best validation loss
     truth_probe.output_w.weight.data.copy_(best_weights.to(device))
@@ -243,8 +254,8 @@ def train_probe(
         final_val_acc = (preds.round() == gpu_val_labels).float().mean().item()
     
     train_time_in_secs = time.time() - probe_train_start_ts
-    logger.info(f"Using best Epoch {best_epoch}: Final Val Loss: {final_val_loss:.16f}, Final Val Acc: {final_val_acc:.12f};\n"
-                f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec with final learning rate {optimizer.param_groups[0][learn_rate_optimizer_param_key]} and final weight decay {optimizer.param_groups[0][weight_decay_optimizer_param_key]}")
+    logger.info(f"Using best Epoch {best_epoch}: Final Val Loss: {final_val_loss:.6e}, Final Val Acc: {final_val_acc:.12%};\n"
+                f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec with final learning rate {get_optimizer_val(optimizer, learn_rate_key):e} and final weight decay {get_optimizer_val(optimizer, weight_decay_key):e}, ending at epoch {epoch}")
     return truth_probe
 
 def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_activs: torch.Tensor, 
@@ -279,7 +290,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         lyr18_probe_state_dict = torch.load(lyr18_probe_save_location, weights_only=True)
         lyr18_probe.load_state_dict(lyr18_probe_state_dict)
     else:
-        logger.debug(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+        logger.info(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyr18_probe = train_probe(lyr18_train_activs, train_truth_labels, lyr18_val_activs, val_truth_labels, 
                                   dset_dirs.lyr18_mean_activ, dset_dirs.lyr18_truth_dir, dset_dirs.lyr18_polarity_dir)
         torch.save(lyr18_probe.state_dict(), lyr18_probe_save_location)
@@ -291,7 +302,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         lyr25_probe_state_dict = torch.load(lyr25_probe_save_location, weights_only=True)
         lyr25_probe.load_state_dict(lyr25_probe_state_dict)
     else:
-        logger.debug(f"training the layer25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+        logger.info(f"training the layer25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyr25_probe = train_probe(lyr25_train_activs, train_truth_labels, lyr25_val_activs, val_truth_labels,
                                   dset_dirs.lyr25_mean_activ, dset_dirs.lyr25_truth_dir, dset_dirs.lyr25_polarity_dir)
         torch.save(lyr25_probe.state_dict(), lyr25_probe_save_location)
@@ -303,7 +314,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         lyrs18_and_25_probe_state_dict = torch.load(lyrs18_and_25_probe_save_location, weights_only=True)
         lyrs18_and_25_probe.load_state_dict(lyrs18_and_25_probe_state_dict)
     else:
-        logger.debug(f"training the layers18 and 25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+        logger.info(f"training the layers18 and 25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyrs18_and_25_train_activs = torch.concat((lyr18_train_activs, lyr25_train_activs), dim=1)
         lyrs18_and_25_val_activs = torch.concat((lyr18_val_activs, lyr25_val_activs), dim=1)
         lyrs18_and_25_probe = train_probe(lyrs18_and_25_train_activs, train_truth_labels, lyrs18_and_25_val_activs, val_truth_labels,
