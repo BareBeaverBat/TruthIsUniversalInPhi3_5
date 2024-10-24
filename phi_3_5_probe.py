@@ -208,21 +208,21 @@ def train_probe(
             loss_delta_over_group = curr_avg_loss - prev_epoch_group_loss
             if epoch > 3*num_epochs_in_group:
                 if loss_delta_over_group >= 0:
-                    logger.warning(f"shrinking learning rate from {get_optimizer_val(optimizer, learn_rate_key):e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group} since {num_epochs_in_group} epochs ago")
+                    logger.warning(f"shrinking learning rate from {get_optimizer_val(optimizer, learn_rate_key):e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago")
                     scale_lr_by(optimizer, 0.707)
                 if num_stalls_in_epoch_group > 0.7*num_epochs_in_group:
                     if optimizer.param_groups[0][weight_decay_key] < 0.2:
                         logger.warning(f"increasing weight decay from {get_optimizer_val(optimizer, weight_decay_key):e} at epoch {epoch} because (over last {num_prev_losses_tracked} timesteps) validation loss hasn't even been close to improving smoothly- more than 40% of the last {num_epochs_in_group} epochs have been stagnant")
                         shift_weight_decay_by(optimizer, 0.005)
                     elif loss_delta_over_group >= 0:
-                        logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) hasn't improved since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods that the weight decay has already been increased to its maximum")
+                        logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods in earlier epoch groups that the weight decay has already been increased to its maximum")
                         print_epoch_group_losses(epoch)
                         break
                     else:
-                        logger.info(f"at epoch {epoch}, last {num_epochs_in_group} epochs had a lot of stalls and weight decay has already been boosted to its maximum, but loss has improved by {loss_delta_over_group:.6e} since {num_epochs_in_group} epochs ago, so continuing")
+                        logger.info(f"at epoch {epoch}, last {num_epochs_in_group} epochs had a lot of stalls and weight decay has already been boosted to its maximum, but loss has improved by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago, so continuing")
             
             if loss_delta_over_group < 0 and num_stalls_in_epoch_group < 50:
-                logger.info(f"scaling learning rate up from {get_optimizer_val(optimizer, learn_rate_key):e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:.6e} since {num_epochs_in_group} epochs ago and last {num_epochs_in_group} epochs have included a minimal number of stagnant or backsliding epochs")
+                logger.info(f"scaling learning rate up from {get_optimizer_val(optimizer, learn_rate_key):e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and last {num_epochs_in_group} epochs have included a minimal number of stagnant or backsliding epochs")
                 scale_lr_by(optimizer, 1.2)
             
             prev_epoch_group_loss = curr_avg_loss
