@@ -158,7 +158,10 @@ def train_probe(
     def print_epoch_group_losses(latest_epoch: int):
         log_msg_for_epoch_group = f"Val losses for {len(val_loss_msgs_for_epoch_group)} epochs up to epoch {latest_epoch}:\n"
         for line_idx in range(0, len(val_loss_msgs_for_epoch_group), num_epoch_losses_per_log_line):
-            log_msg_for_epoch_group += '; '.join(val_loss_msgs_for_epoch_group[line_idx:line_idx+num_epoch_losses_per_log_line]) + '\n'
+            max_epoch_idx_in_line = line_idx + num_epoch_losses_per_log_line
+            log_msg_for_epoch_group += '; '.join(val_loss_msgs_for_epoch_group[line_idx:max_epoch_idx_in_line])
+            if max_epoch_idx_in_line < len(val_loss_msgs_for_epoch_group):
+                log_msg_for_epoch_group += '\n'
         logger.debug(log_msg_for_epoch_group)
         val_loss_msgs_for_epoch_group.clear()
     
@@ -283,7 +286,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         lyr18_probe_state_dict = torch.load(lyr18_probe_save_location, weights_only=True)
         lyr18_probe.load_state_dict(lyr18_probe_state_dict)
     else:
-        logger.debug(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+        logger.info(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyr18_probe = train_probe(lyr18_train_activs, train_truth_labels, lyr18_val_activs, val_truth_labels, 
                                   dset_dirs.lyr18_mean_activ, dset_dirs.lyr18_truth_dir, dset_dirs.lyr18_polarity_dir)
         torch.save(lyr18_probe.state_dict(), lyr18_probe_save_location)
@@ -295,7 +298,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         lyr25_probe_state_dict = torch.load(lyr25_probe_save_location, weights_only=True)
         lyr25_probe.load_state_dict(lyr25_probe_state_dict)
     else:
-        logger.debug(f"training the layer25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+        logger.info(f"training the layer25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyr25_probe = train_probe(lyr25_train_activs, train_truth_labels, lyr25_val_activs, val_truth_labels,
                                   dset_dirs.lyr25_mean_activ, dset_dirs.lyr25_truth_dir, dset_dirs.lyr25_polarity_dir)
         torch.save(lyr25_probe.state_dict(), lyr25_probe_save_location)
@@ -307,7 +310,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         lyrs18_and_25_probe_state_dict = torch.load(lyrs18_and_25_probe_save_location, weights_only=True)
         lyrs18_and_25_probe.load_state_dict(lyrs18_and_25_probe_state_dict)
     else:
-        logger.debug(f"training the layers18 and 25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+        logger.info(f"training the layers18 and 25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyrs18_and_25_train_activs = torch.concat((lyr18_train_activs, lyr25_train_activs), dim=1)
         lyrs18_and_25_val_activs = torch.concat((lyr18_val_activs, lyr25_val_activs), dim=1)
         lyrs18_and_25_probe = train_probe(lyrs18_and_25_train_activs, train_truth_labels, lyrs18_and_25_val_activs, val_truth_labels,

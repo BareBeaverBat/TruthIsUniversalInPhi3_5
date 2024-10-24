@@ -1,6 +1,8 @@
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
+import winsound
+
 
 import numpy as np
 import torch
@@ -88,6 +90,7 @@ def solve_for_truth_polarity_vectors(
         ols_result = least_squares(loss_fun, init_truth_and_polarity_vects, verbose=2)
     num_secs_running_ols = time.time() - start_of_ols_ts
     logger.debug(f"OLS for truth/polarity directions finished after {num_secs_running_ols // 60} min, {num_secs_running_ols % 60:.3f} sec")
+    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
     
     if not ols_result['success']:
         logger.error(f"problem while solving for truth and polarity directions: {ols_result['message']}")
@@ -122,29 +125,48 @@ def learn_directions_for_dset(
         assert isinstance(tensors_dict, dict)
         return DirVectors(**tensors_dict)
     
-    logger.debug(f"doing direction-learning for layer 18 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
-    
     train_bipolar_truth_labels = train_truth_labels.clone()
     train_bipolar_truth_labels[train_bipolar_truth_labels == 0] = -1
-    
+
+    logger.info(f"doing direction-learning for layer 18 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
     lyr18_train_activs = train_activs[0, :, :]
     lyr18_mean_train_activ = lyr18_train_activs.mean(dim=0, keepdim=True).T
     assert lyr18_mean_train_activ.shape == (activs_size, 1)
     lyr18_centered_train_activs = lyr18_train_activs - lyr18_mean_train_activ.T
     assert lyr18_centered_train_activs.shape == (num_train_records, activs_size)
-    lyr18_truth_dir, lyr18_polarity_dir = solve_for_truth_polarity_vectors(
-        lyr18_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+
+    lyr18_dirs_temp_save_location = output_folder / f"{output_nm_prefix}_lyr18_tmp.pt"
+    if lyr18_dirs_temp_save_location.exists():
+        logger.info("skipping layer 18 direction-learning because the file already exists")
+        lyr18_saved_dirs = torch.load(lyr18_dirs_temp_save_location, weights_only=True)
+        assert isinstance(lyr18_saved_dirs, dict)
+        lyr18_truth_dir, lyr18_polarity_dir = lyr18_saved_dirs['lyr18_truth_dir'], lyr18_saved_dirs['lyr18_polarity_dir']
+    else:
+        lyr18_truth_dir, lyr18_polarity_dir = solve_for_truth_polarity_vectors(
+            lyr18_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+        lyr18_dirs_storage = {'lyr18_truth_dir': lyr18_truth_dir, 'lyr18_polarity_dir': lyr18_polarity_dir}
+        torch.save(lyr18_dirs_storage, lyr18_dirs_temp_save_location)
     
-    logger.debug(f"doing direction-learning for layer 25 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+    logger.info(f"doing direction-learning for layer 25 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
     lyr25_train_activs = train_activs[1, :, :]
     lyr25_mean_train_activ = lyr25_train_activs.mean(dim=0, keepdim=True).T
     assert lyr25_mean_train_activ.shape == (activs_size, 1)
     lyr25_centered_train_activs = lyr25_train_activs - lyr25_mean_train_activ.T
     assert lyr25_centered_train_activs.shape == (num_train_records, activs_size)
-    lyr25_truth_dir, lyr25_polarity_dir = solve_for_truth_polarity_vectors(
-        lyr25_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+
+    lyr25_dirs_temp_save_location = output_folder / f"{output_nm_prefix}_lyr25_tmp.pt"
+    if lyr25_dirs_temp_save_location.exists():
+        logger.info("skipping layer 25 direction-learning because the file already exists")
+        lyr25_saved_dirs = torch.load(lyr25_dirs_temp_save_location, weights_only=True)
+        assert isinstance(lyr25_saved_dirs, dict)
+        lyr25_truth_dir, lyr25_polarity_dir = lyr25_saved_dirs['lyr25_truth_dir'], lyr25_saved_dirs['lyr25_polarity_dir']
+    else:
+        lyr25_truth_dir, lyr25_polarity_dir = solve_for_truth_polarity_vectors(
+            lyr25_centered_train_activs, train_bipolar_truth_labels, train_polarity_labels, np_rng)
+        lyr25_dirs_storage = {'lyr25_truth_dir': lyr25_truth_dir, 'lyr25_polarity_dir': lyr25_polarity_dir}
+        torch.save(lyr25_dirs_storage, lyr25_dirs_temp_save_location)
     
-    logger.debug(f"doing direction-learning for layers 18 & 25 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
+    logger.info(f"doing direction-learning for layers 18 & 25 for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
     lyrs18_and_25_mean_train_activ = torch.concat((lyr18_mean_train_activ, lyr25_mean_train_activ), dim=0)
     assert lyrs18_and_25_mean_train_activ.shape == (2*activs_size, 1)
     lyrs18_and_25_centered_train_activs = torch.concat(
