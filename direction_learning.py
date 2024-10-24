@@ -46,13 +46,6 @@ class DirVectors:
                 == self.lyrs18_and_25_polarity_dir.shape[0]):
             raise ValueError(f"all vectors for double-layer scenarios should have same length, but instead their first dimension's size is: self.lyrs18_and_25_mean_activ.shape[0]={self.lyrs18_and_25_mean_activ.shape[0]}; self.lyrs18_and_25_truth_dir.shape[0]={self.lyrs18_and_25_truth_dir.shape[0]}; self.lyrs18_and_25_polarity_dir.shape[0]={self.lyrs18_and_25_polarity_dir.shape[0]}")
 
-@dataclass
-class VariantCombosInTopic:
-    affirm_neg: DirVectors
-    affirm_disj: DirVectors
-    neg_conj: DirVectors
-    affirm_neg_conj_disj: DirVectors
-
 
 def normalized_recon_loss(
         activations_data: torch.Tensor, truth_labels: torch.Tensor, polarity_labels: torch.Tensor,
@@ -119,6 +112,7 @@ def solve_for_truth_polarity_vectors(
     final_truth_and_polarity_vects = final_truth_and_polarity_vects.astype(np.float32)
     return (torch.from_numpy(final_truth_and_polarity_vects[0:vector_size, np.newaxis]),
             torch.from_numpy(final_truth_and_polarity_vects[vector_size:2*vector_size, np.newaxis]))
+
 
 def learn_directions_for_dset(
         output_folder: Path, output_nm_prefix: str, train_activs: torch.Tensor, train_truth_labels: torch.Tensor,
@@ -204,5 +198,10 @@ def learn_directions_for_dset(
                          lyrs18_and_25_polarity_dir=lyrs18_and_25_polarity_dir)
 
     torch.save(asdict(vectors), save_location)
-    
+
+    if lyr18_dirs_temp_save_location.exists():
+        lyr18_dirs_temp_save_location.unlink()
+    if lyr25_dirs_temp_save_location.exists():
+        lyr25_dirs_temp_save_location.unlink()
+
     return vectors
