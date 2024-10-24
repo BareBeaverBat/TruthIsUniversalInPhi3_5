@@ -210,7 +210,7 @@ def train_probe(
             if epoch > 3*num_epochs_in_group:
                 if num_stalls_in_epoch_group > 0.7*num_epochs_in_group:
                     if optimizer.param_groups[0][weight_decay_key] < 0.2:
-                        logger.warning(f"increasing weight decay from {get_optimizer_val(optimizer, weight_decay_key):e} at epoch {epoch} because (over last {num_prev_losses_tracked} timesteps) validation loss hasn't even been close to improving smoothly- more than 40% of the last {num_epochs_in_group} epochs have been stagnant")
+                        logger.warning(f"increasing weight decay from {get_optimizer_val(optimizer, weight_decay_key):e} at epoch {epoch} because (over last {num_epochs_in_group} timesteps) validation loss hasn't even been close to improving smoothly- more than 40% of the last {num_epochs_in_group} epochs have been stagnant")
                         shift_weight_decay_by(optimizer, 0.005)
                     elif loss_delta_over_group >= 0:
                         logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods in earlier epoch groups that the weight decay has already been increased to its maximum")

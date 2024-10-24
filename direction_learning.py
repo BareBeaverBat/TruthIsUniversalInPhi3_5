@@ -54,6 +54,26 @@ class VariantCombosInTopic:
     affirm_neg_conj_disj: DirVectors
 
 
+def normalized_recon_loss(
+        activations_data: torch.Tensor, truth_labels: torch.Tensor, polarity_labels: torch.Tensor,
+        mean_activation_estim: torch.Tensor, truth_dir_estim: torch.Tensor, polarity_dir_estim: torch.Tensor)-> float:
+    assert (2 == activations_data.ndim == truth_labels.ndim == polarity_labels.ndim == mean_activation_estim.ndim
+            == truth_dir_estim.ndim == polarity_dir_estim.ndim)
+    assert activations_data.shape[0] == truth_labels.shape[0] == polarity_labels.shape[0]
+    vector_size = activations_data.shape[1]
+    if vector_size % hidden_state_size != 0:
+        logger.warning(f"NOTE- not using phi 3.5 mini because vector size {vector_size} is wrong")
+    assert vector_size == mean_activation_estim.shape[0] == truth_dir_estim.shape[0] == polarity_dir_estim.shape[0]
+    assert 1 == truth_labels.shape[1] == polarity_labels.shape[1] == mean_activation_estim.shape[1] == truth_dir_estim.shape[1] == polarity_dir_estim.shape[1]
+    assert is_bipolar(truth_labels), "Not all truth labels are 1 or -1"
+    assert is_bipolar(polarity_labels), "Not all polarity labels are 1 or -1"
+    
+    data_reconstr = (mean_activation_estim.T + truth_labels @ truth_dir_estim.T
+                     + (truth_labels * polarity_labels) @ polarity_dir_estim.T)
+    normed_loss = np.mean(np.square(np.linalg.norm(activations_data - data_reconstr, axis=1)))
+    return normed_loss
+
+
 def solve_for_truth_polarity_vectors(
         centered_activations_data: torch.Tensor, truth_labels: torch.Tensor, polarity_labels: torch.Tensor,
         np_rng: np.random.Generator) -> (torch.Tensor, torch.Tensor):

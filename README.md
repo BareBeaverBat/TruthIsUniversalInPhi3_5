@@ -2,6 +2,8 @@
 Reproducing many of the experiments of the "Truth is Universal" paper (Bürger et al.) for Phi-3.5-mini, and testing out 
 a few things that they didn't mention trying.
 
+[Final report](Report.md)
+
 ## Analysis Plan
 
 ### Different layers
