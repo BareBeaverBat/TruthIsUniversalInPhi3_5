@@ -155,7 +155,7 @@ def train_probe(
     
     num_epochs_in_group = 1024#//epoch_shrinkage_factor
     
-    num_epoch_losses_per_log_line=7
+    num_epoch_losses_per_log_line=8#this will be displayed without softwrap in notepad++ on my laptop ~only if no < or ! prefixes on epoch losses, making epochs with those prefixes stand out more
     
     def print_epoch_group_losses(latest_epoch: int):
         log_msg_for_epoch_group = f"Val losses for {len(val_loss_msgs_for_epoch_group)} epochs up to epoch {latest_epoch}:\n"
@@ -216,7 +216,6 @@ def train_probe(
                         shift_weight_decay_by(optimizer, 0.005)
                     elif loss_delta_over_group >= 0:
                         logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods in earlier epoch groups that the weight decay has already been increased to its maximum")
-                        print_epoch_group_losses(epoch)
                         break
                     else:
                         logger.info(f"at epoch {epoch}, last {num_epochs_in_group} epochs had a lot of stalls and weight decay has already been boosted to its maximum, but loss has improved by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago, so continuing")
