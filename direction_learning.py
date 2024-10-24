@@ -9,7 +9,7 @@ from scipy.optimize import least_squares
 
 from logging_setup import StdoutToLoggerRedirection, create_logger
 from phi_3_5_constants import hidden_state_size
-from phi_3_5_probe import is_binary
+from utils import is_binary, is_bipolar
 
 logger = create_logger(__name__)
 
@@ -51,10 +51,6 @@ class VariantCombosInTopic:
     neg_conj: DirVectors
     affirm_neg_conj_disj: DirVectors
 
-def is_bipolar(labels: torch.Tensor | NDArray) -> bool:
-    abs_vals = labels.abs() if isinstance(labels, torch.Tensor) else abs(labels)
-    result = (abs_vals == 1).all()
-    return result.item() if isinstance(result, torch.Tensor) else result
 
 def solve_for_truth_polarity_vectors(
         centered_activations_data: torch.Tensor, truth_labels: torch.Tensor, polarity_labels: torch.Tensor,
