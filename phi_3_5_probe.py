@@ -1,4 +1,3 @@
-import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,6 +150,7 @@ def train_probe(
     val_loss_msgs_for_epoch_group: list[str] = []
     
     prev_epoch_group_loss = np.inf
+    had_prev_epoch_group_been_improvement = False
     num_stalls_in_epoch_group = 0
     
     num_epochs_in_group = 1024#//epoch_shrinkage_factor
@@ -209,20 +209,19 @@ def train_probe(
                 if num_stalls_in_epoch_group > 0.7*num_epochs_in_group:
                     if optimizer.param_groups[0][weight_decay_key] < 0.2:
                         logger.warning(f"increasing weight decay from {get_optimizer_val(optimizer, weight_decay_key):e} at epoch {epoch} because (over last {num_epochs_in_group} timesteps) validation loss hasn't even been close to improving smoothly- more than 40% of the last {num_epochs_in_group} epochs have been stagnant")
-                        shift_weight_decay_by(optimizer, 0.005)
+                        shift_weight_decay_by(optimizer, 0.01)
                     elif loss_delta_over_group >= 0:
                         logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods in earlier epoch groups that the weight decay has already been increased to its maximum")
                         break
                     else:
                         logger.info(f"at epoch {epoch}, last {num_epochs_in_group} epochs had a lot of stalls and weight decay has already been boosted to its maximum, but loss has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago, so continuing")
-                elif loss_delta_over_group < 0:
+                elif loss_delta_over_group < 0 and had_prev_epoch_group_been_improvement and curr_lr < base_learning_rate:
                     # if it finally gets on a good trajectory, but only after many cuts-in-learning-rate/increases-in-weight-decay
                     #  otherwise, it can spend literally hundreds of thousands of epochs making improvement in every 1024-epoch group
                     #  relative to the prior group and yet still have a loss above 0.1 after all of that time
                     #  (because the updates were all way too small)
-                    if curr_lr < base_learning_rate:
-                        logger.info(f"scaling learning rate up from {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and because most of the last {num_epochs_in_group} epochs were locally improving the validation loss")
-                        scale_lr_by(optimizer, 1.2)
+                    logger.info(f"scaling learning rate up from {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and because most of the last {num_epochs_in_group} epochs were locally improving the validation loss")
+                    scale_lr_by(optimizer, 1.2)
                         
                 if loss_delta_over_group >= 0:
                     logger.warning(f"shrinking learning rate from {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago")
@@ -234,6 +233,7 @@ def train_probe(
                 scale_lr_by(optimizer, 1.2)
             
             prev_epoch_group_loss = curr_avg_loss
+            had_prev_epoch_group_been_improvement = loss_delta_over_group < 0
             num_stalls_in_epoch_group = 0
         
         if is_new_best:
@@ -243,7 +243,7 @@ def train_probe(
             best_bias = truth_probe.output_w.bias.clone().detach().cpu()
             
             if epoch > 100 and val_loss < 1e-14:
-                print_epoch_group_losses(epoch)
+                print_epoch_group_losses(epoch, 0)
                 logger.info(f"stopping early at epoch {epoch}!")
                 break
         
