@@ -1,0 +1,1 @@
+{"animal_class": {"affirm": 0, "conj": 1, "disj": 2, "neg": 3}, "cities": {"affirm": 4, "conj": 5, "disj": 6, "neg": 7}, "element_symb": {"affirm": 8, "conj": 9, "disj": 10, "neg": 11}, "facts": {"affirm": 12, "conj": 13, "disj": 14, "neg": 15}, "inventors": {"affirm": 16, "conj": 17, "disj": 18, "neg": 19}, "sp_en_trans": {"neg": 27, "affirm": 28, "conj": 29, "disj": 30}}
