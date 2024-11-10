@@ -49,7 +49,7 @@ class DirVectors:
 
 def normalized_recon_loss(
         activations_data: torch.Tensor, truth_labels: torch.Tensor, polarity_labels: torch.Tensor,
-        mean_activation_estim: torch.Tensor, truth_dir_estim: torch.Tensor, polarity_dir_estim: torch.Tensor)-> float:
+        mean_activation_estim: torch.Tensor, truth_dir_estim: torch.Tensor, polarity_dir_estim: torch.Tensor) -> (float, float):
     assert (2 == activations_data.ndim == truth_labels.ndim == polarity_labels.ndim == mean_activation_estim.ndim
             == truth_dir_estim.ndim == polarity_dir_estim.ndim)
     assert activations_data.shape[0] == truth_labels.shape[0] == polarity_labels.shape[0]
@@ -63,8 +63,13 @@ def normalized_recon_loss(
     
     data_reconstr = (mean_activation_estim.T + truth_labels @ truth_dir_estim.T
                      + (truth_labels * polarity_labels) @ polarity_dir_estim.T)
-    normed_loss = np.mean(np.square(np.linalg.norm(activations_data - data_reconstr, axis=1)))
-    return normed_loss
+
+    loss_per_record = np.mean(np.square(np.linalg.norm(activations_data - data_reconstr, axis=1)))
+    loss_per_record_with_just_mean_activ = np.mean(np.square(np.linalg.norm(activations_data - mean_activation_estim.T, axis=1)))
+
+
+
+    return loss_per_record
 
 
 def solve_for_truth_polarity_vectors(
@@ -90,7 +95,7 @@ def solve_for_truth_polarity_vectors(
     #this has to have shape (n,) rather than (n,1) because of scipy
     init_truth_and_polarity_vects = np_rng.normal(size=(2*vector_size,))
     
-    def loss_fun(truth_and_polarity_vect_values: NDArray)-> float:
+    def loss_fun(truth_and_polarity_vect_values: NDArray) -> float:
         truth_dir = truth_and_polarity_vect_values[0:vector_size, np.newaxis]
         polarity_dir = truth_and_polarity_vect_values[vector_size:2*vector_size, np.newaxis]
         guess_at_centered_data = truth_labels @ truth_dir.T + (truth_labels * polarity_labels) @ polarity_dir.T
