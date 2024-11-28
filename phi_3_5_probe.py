@@ -1,6 +1,7 @@
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping, Any
 
 import numpy as np
 import torch
@@ -8,6 +9,7 @@ import torch.nn as nn
 from numpy.typing import NDArray
 import torch.optim as optim
 import tqdm
+from torch.nn.modules.module import _IncompatibleKeys
 
 from direction_learning import DirVectors
 from logging_setup import create_logger
@@ -36,7 +38,15 @@ class PolarityAwareTruthProbe(nn.Module):
         
         self.output_w = nn.Linear(2*self.activation_size, 1)
         self.activ = nn.Sigmoid()
-    
+
+    def load_state_dict(
+        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+    ) -> _IncompatibleKeys:
+        problem_keys = super().load_state_dict(state_dict, strict, assign)
+        self.truth_dir_norm = np.linalg.norm(self.truth_dir)
+        self.polarity_dir_norm = np.linalg.norm(self.polarity_dir)
+        return problem_keys
+
     def forward(self, x: torch.Tensor | NDArray):
         assert 2 == x.ndim
         assert self.activation_size == x.shape[1]
