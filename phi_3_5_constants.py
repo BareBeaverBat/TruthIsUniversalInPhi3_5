@@ -26,4 +26,6 @@ probes_folder = Path("trained_probes")
 
 directions_reconstruction_losses_path = directions_results_folder / "reconstruction_losses.csv"
 
+train_split_classification_metrics_path = probes_folder / "train_split_metrics.json"
+validation_split_classification_metrics_path = probes_folder / "validation_split_metrics.json"
 

@@ -327,8 +327,10 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
         logger.info(f"training the layers18 and 25 probe for {num_train_records} records of data {output_nm_prefix} in the location {output_folder}")
         lyrs18_and_25_train_activs = torch.concat((lyr18_train_activs, lyr25_train_activs), dim=1)
         lyrs18_and_25_val_activs = torch.concat((lyr18_val_activs, lyr25_val_activs), dim=1)
-        lyrs18_and_25_probe = train_probe(lyrs18_and_25_train_activs, train_truth_labels, lyrs18_and_25_val_activs, val_truth_labels,
-                                  dset_dirs.lyrs18_and_25_mean_activ, dset_dirs.lyrs18_and_25_truth_dir, dset_dirs.lyrs18_and_25_polarity_dir)
+        lyrs18_and_25_probe = train_probe(
+            lyrs18_and_25_train_activs, train_truth_labels, lyrs18_and_25_val_activs, val_truth_labels,
+            dset_dirs.lyrs18_and_25_mean_activ, dset_dirs.lyrs18_and_25_truth_dir, dset_dirs.lyrs18_and_25_polarity_dir)
         torch.save(lyrs18_and_25_probe.state_dict(), lyrs18_and_25_probe_save_location)
     
     return ProbesForDataset(lyr18_probe, lyr25_probe, lyrs18_and_25_probe)
+
