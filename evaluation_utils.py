@@ -264,6 +264,19 @@ class MetricsForDatasetProbes:
         """Create MetricsForDatasetProbes instance from JSON string"""
         return cls.from_dict(json.loads(json_str))
 
+    @classmethod
+    def combine(cls, *dsets_metrics: 'MetricsForDatasetProbes') -> 'MetricsForDatasetProbes':
+        """
+        Combine multiple MetricsForDatasetProbes instances for various smaller datasets into a single instance for the
+        classifier's performance across all of those datasets.
+        """
+        combined = cls(
+            lyr18_probe_metrics=ConfusionMetrics.combine(*[m.lyr18_probe_metrics for m in dsets_metrics]),
+            lyr25_probe_metrics=ConfusionMetrics.combine(*[m.lyr25_probe_metrics for m in dsets_metrics]),
+            lyrs18_and_25_probe_metrics=ConfusionMetrics.combine(*[m.lyrs18_and_25_probe_metrics for m in dsets_metrics])
+        )
+        return combined
+
 
 def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch.Tensor, truth_labels: torch.Tensor,
                                     threshold=0.5) -> MetricsForDatasetProbes:

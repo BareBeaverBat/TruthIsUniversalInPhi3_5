@@ -23,9 +23,11 @@ misc_datasets_index_path = dsets_folder / "misc_dsets_index.json"
 four_way_topics_index_path = dsets_folder / "four_way_dsets_index.json"
 
 probes_folder = Path("trained_probes")
+analysis_results_folder = Path("analysis_results")
 
 directions_reconstruction_losses_path = directions_results_folder / "reconstruction_losses.csv"
 
 train_split_classification_metrics_path = probes_folder / "train_split_metrics.json"
 validation_split_classification_metrics_path = probes_folder / "validation_split_metrics.json"
 
+test_classification_metrics_path = analysis_results_folder / "test_metrics.json"

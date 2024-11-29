@@ -344,3 +344,33 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
     
     return ProbesForDataset(lyr18_probe, lyr25_probe, lyrs18_and_25_probe)
 
+
+def load_probes_for_dset(output_folder: Path, output_nm_prefix: str, activations_size=hidden_state_size
+                         ) -> ProbesForDataset:
+    lyr18_probe_save_location = output_folder / f"{output_nm_prefix}_lyr18_probe.pth"
+    if lyr18_probe_save_location.exists():
+        lyr18_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1),
+                                              torch.ones(activations_size, 1))
+        lyr18_probe_state_dict = torch.load(lyr18_probe_save_location, weights_only=True)
+        lyr18_probe.load_state_dict(lyr18_probe_state_dict)
+    else:
+        raise FileNotFoundError(f"Couldn't find the file {lyr18_probe_save_location}")
+    lyr25_probe_save_location = output_folder / f"{output_nm_prefix}_lyr25_probe.pth"
+    if lyr25_probe_save_location.exists():
+        lyr25_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1),
+                                              torch.ones(activations_size, 1))
+        lyr25_probe_state_dict = torch.load(lyr25_probe_save_location, weights_only=True)
+        lyr25_probe.load_state_dict(lyr25_probe_state_dict)
+    else:
+        raise FileNotFoundError(f"Couldn't find the file {lyr25_probe_save_location}")
+    lyrs18_and_25_probe_save_location = output_folder / f"{output_nm_prefix}_lyrs18_and_25_probe.pth"
+    if lyrs18_and_25_probe_save_location.exists():
+        lyrs18_and_25_probe = PolarityAwareTruthProbe(torch.ones(2 * activations_size, 1),
+                                                      torch.ones(2 * activations_size, 1),
+                                                      torch.ones(2 * activations_size, 1))
+        lyrs18_and_25_probe_state_dict = torch.load(lyrs18_and_25_probe_save_location, weights_only=True)
+        lyrs18_and_25_probe.load_state_dict(lyrs18_and_25_probe_state_dict)
+    else:
+        raise FileNotFoundError(f"Couldn't find the file {lyrs18_and_25_probe_save_location}")
+
+    return ProbesForDataset(lyr18_probe, lyr25_probe, lyrs18_and_25_probe)
