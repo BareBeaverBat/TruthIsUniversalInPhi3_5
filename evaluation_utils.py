@@ -237,6 +237,7 @@ class MetricsForDatasetProbes:
     lyr18_probe_metrics: ConfusionMetrics
     lyr25_probe_metrics: ConfusionMetrics
     lyrs18_and_25_probe_metrics: ConfusionMetrics
+    #TODO add a field for lyr18_baseline_linear_probe_metrics and do all of the corresponding changes elsewhere in the class
 
     def to_dict(self) -> dict:
         """Serialize metrics to dictionary"""
@@ -317,6 +318,7 @@ def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch
     lyr18_probe_metrics.update(labels_np, lyr18_probe_preds.numpy())
     lyr25_probe_metrics.update(labels_np, lyr25_probe_preds.numpy())
     lyrs18_and_25_probe_metrics.update(labels_np, lyrs18_and_25_probe_preds.numpy())
+    #TODO add the baseline linear probe metrics
 
     return MetricsForDatasetProbes(
         lyr18_probe_metrics=lyr18_probe_metrics,

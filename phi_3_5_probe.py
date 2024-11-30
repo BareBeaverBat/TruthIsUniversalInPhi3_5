@@ -57,12 +57,18 @@ class PolarityAwareTruthProbe(nn.Module):
         transformed_x = torch.concat((truth_proj, polarity_proj), dim=1)
         return self.activ(self.output_w(transformed_x))
 
+#TODO add a LinearProbe class that's equivalent to LRProbe here
+# https://github.com/saprmarks/geometry-of-truth/blob/main/probes.py#L3
+# but with the same submodule name 'output_w' as PolarityAwareTruthProbe
+# so the training code can be easily reused
+
 
 @dataclass
 class ProbesForDataset:
     lyr18_probe: PolarityAwareTruthProbe
     lyr25_probe: PolarityAwareTruthProbe
-    lyrs18_and_25_probe: PolarityAwareTruthProbe    
+    lyrs18_and_25_probe: PolarityAwareTruthProbe
+    #TODO add lyr18_baseline_linear_probe: LinearProbe
 
 def get_optimizer_val(optimizer: torch.optim.Optimizer, param_key: str):
     return optimizer.param_groups[0][param_key]
@@ -75,6 +81,7 @@ def shift_weight_decay_by(optimizer: torch.optim.Optimizer, offset: float):
     for param_group in optimizer.param_groups:
         param_group[weight_decay_key] = offset + param_group[weight_decay_key]
 
+#TODO refactor this and train_probes_for_dset() to allow training linear probe without truth/polarity directions
 def train_probe(
         train_activations: torch.Tensor, train_truth_labels: torch.Tensor, val_activations: torch.Tensor,
         val_truth_labels: torch.Tensor, mean_train_activ: torch.Tensor, truth_dir: torch.Tensor,
@@ -278,6 +285,7 @@ def train_probe(
                 f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec with final learning rate {get_optimizer_val(optimizer, learn_rate_key):e} and final weight decay {get_optimizer_val(optimizer, weight_decay_key):.4f}, ending at epoch {epoch}")
     return truth_probe
 
+#TODO tweak this to also train a baseline linear probe on layer 18 activations
 def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_activs: torch.Tensor, 
                           train_truth_labels: torch.Tensor, val_activs: torch.Tensor, val_truth_labels: torch.Tensor,
                           dset_dirs: DirVectors) -> ProbesForDataset:
@@ -344,7 +352,7 @@ def train_probes_for_dset(output_folder: Path, output_nm_prefix: str, train_acti
     
     return ProbesForDataset(lyr18_probe, lyr25_probe, lyrs18_and_25_probe)
 
-
+#TODO tweak this to also load the baseline linear probe on layer 18 activations
 def load_probes_for_dset(output_folder: Path, output_nm_prefix: str, activations_size=hidden_state_size
                          ) -> ProbesForDataset:
     lyr18_probe_save_location = output_folder / f"{output_nm_prefix}_lyr18_probe.pth"
