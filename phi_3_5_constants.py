@@ -31,3 +31,6 @@ train_split_classification_metrics_path = probes_folder / "train_split_metrics.j
 validation_split_classification_metrics_path = probes_folder / "validation_split_metrics.json"
 
 test_classification_metrics_path = analysis_results_folder / "test_metrics.json"
+
+separation_by_layer_analysis_path = analysis_results_folder / "separation_by_layer.csv"
+
