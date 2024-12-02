@@ -36,8 +36,7 @@ class PolarityAwareTruthProbe(nn.Module):
         self.register_buffer('polarity_dir', polarity_dir)
         self.polarity_dir_norm = np.linalg.norm(polarity_dir)
 
-        # TODO remove bias and delete all existing trained probes, then retrain them, redo the evaluation step, and confirm whether existing analysis-of/commentary-on results still holds
-        self.output_w = nn.Linear(2*self.activation_size, 1)#, bias=False)
+        self.output_w = nn.Linear(2*self.activation_size, 1, bias=False)
         self.activ = nn.Sigmoid()
 
     def load_state_dict(
