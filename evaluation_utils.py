@@ -237,14 +237,15 @@ class MetricsForDatasetProbes:
     lyr18_probe_metrics: ConfusionMetrics
     lyr25_probe_metrics: ConfusionMetrics
     lyrs18_and_25_probe_metrics: ConfusionMetrics
-    #TODO add a field for lyr18_baseline_linear_probe_metrics and do all of the corresponding changes elsewhere in the class
+    lyr18_baseline_linear_probe_metrics: ConfusionMetrics
 
     def to_dict(self) -> dict:
         """Serialize metrics to dictionary"""
         return {
             "lyr18_probe_metrics": self.lyr18_probe_metrics.to_dict(),
             "lyr25_probe_metrics": self.lyr25_probe_metrics.to_dict(),
-            "lyrs18_and_25_probe_metrics": self.lyrs18_and_25_probe_metrics.to_dict()
+            "lyrs18_and_25_probe_metrics": self.lyrs18_and_25_probe_metrics.to_dict(),
+            "lyr18_baseline_linear_probe_metrics": self.lyr18_baseline_linear_probe_metrics.to_dict()
         }
 
     def to_json(self) -> str:
@@ -257,7 +258,8 @@ class MetricsForDatasetProbes:
         return cls(
             lyr18_probe_metrics=ConfusionMetrics.from_dict(data['lyr18_probe_metrics']),
             lyr25_probe_metrics=ConfusionMetrics.from_dict(data['lyr25_probe_metrics']),
-            lyrs18_and_25_probe_metrics=ConfusionMetrics.from_dict(data['lyrs18_and_25_probe_metrics'])
+            lyrs18_and_25_probe_metrics=ConfusionMetrics.from_dict(data['lyrs18_and_25_probe_metrics']),
+            lyr18_baseline_linear_probe_metrics=ConfusionMetrics.from_dict(data['lyr18_baseline_linear_probe_metrics'])
         )
 
     @classmethod
@@ -274,7 +276,10 @@ class MetricsForDatasetProbes:
         combined = cls(
             lyr18_probe_metrics=ConfusionMetrics.combine(*[m.lyr18_probe_metrics for m in dsets_metrics]),
             lyr25_probe_metrics=ConfusionMetrics.combine(*[m.lyr25_probe_metrics for m in dsets_metrics]),
-            lyrs18_and_25_probe_metrics=ConfusionMetrics.combine(*[m.lyrs18_and_25_probe_metrics for m in dsets_metrics])
+            lyrs18_and_25_probe_metrics=
+            ConfusionMetrics.combine(*[m.lyrs18_and_25_probe_metrics for m in dsets_metrics]),
+            lyr18_baseline_linear_probe_metrics=
+            ConfusionMetrics.combine(*[m.lyr18_baseline_linear_probe_metrics for m in dsets_metrics])
         )
         return combined
 
@@ -305,6 +310,8 @@ def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch
     lyr25_probe_metrics = ConfusionMetrics(threshold)
     lyrs18_and_25_probe_metrics = ConfusionMetrics(threshold)
 
+    lyr18_baseline_linear_probe_metrics = ConfusionMetrics(threshold)
+
     lyr18_activs = activations[0, :, :]
     lyr25_activs = activations[1, :, :]
     lyrs18_and_25_activs = torch.cat((lyr18_activs, lyr25_activs), dim=1)
@@ -313,15 +320,19 @@ def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch
     lyr25_probe_preds = probes.lyr25_probe(lyr25_activs).detach()
     lyrs18_and_25_probe_preds = probes.lyrs18_and_25_probe(lyrs18_and_25_activs).detach()
 
+    lyr18_baseline_linear_probe_preds = probes.lyr18_baseline_linear_probe(lyr18_activs).detach()
+
     labels_np = truth_labels.numpy()
 
     lyr18_probe_metrics.update(labels_np, lyr18_probe_preds.numpy())
     lyr25_probe_metrics.update(labels_np, lyr25_probe_preds.numpy())
     lyrs18_and_25_probe_metrics.update(labels_np, lyrs18_and_25_probe_preds.numpy())
-    #TODO add the baseline linear probe metrics
+
+    lyr18_baseline_linear_probe_metrics.update(labels_np, lyr18_baseline_linear_probe_preds.numpy())
 
     return MetricsForDatasetProbes(
         lyr18_probe_metrics=lyr18_probe_metrics,
         lyr25_probe_metrics=lyr25_probe_metrics,
-        lyrs18_and_25_probe_metrics=lyrs18_and_25_probe_metrics
+        lyrs18_and_25_probe_metrics=lyrs18_and_25_probe_metrics,
+        lyr18_baseline_linear_probe_metrics=lyr18_baseline_linear_probe_metrics
     )
