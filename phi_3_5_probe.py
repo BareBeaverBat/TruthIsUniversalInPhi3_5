@@ -233,7 +233,8 @@ def train_probe(
                         break
                     else:
                         logger.info(f"at epoch {epoch}, last {num_epochs_in_group} epochs had a lot of stalls and weight decay has already been boosted to its maximum, but loss has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago, so continuing")
-                        if loss_delta_over_group / (curr_avg_loss - best_loss) < 0.01:
+                        if ((curr_avg_loss - best_loss) > 0 and
+                                loss_delta_over_group / (curr_avg_loss - best_loss) < 0.01):
                             scale_lr_by(optimizer, 1.3)
                             logger.info(f"at epoch {epoch}, the loss improvement over the previous {num_epochs_in_group} epochs was less than 1% of the difference between the best loss so far and the loss at the end of the previous {num_epochs_in_group} epochs, so increasing learning rate to {get_optimizer_val(optimizer, learn_rate_key):e}")
                 elif loss_delta_over_group < 0 and had_prev_epoch_group_been_improvement and curr_lr < base_learning_rate:
