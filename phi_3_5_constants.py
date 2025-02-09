@@ -9,7 +9,7 @@ seed = 1894327
 
 dsets_folder = Path("true_false_datasets")
 
-token_lengths_path = dsets_folder / "dset_record_token_lengths.json"
+#TODO remove all references to these (plus delete the files themselves)
 train_split_records_path = dsets_folder / "train_split_record_indices.json"
 validation_split_records_path = dsets_folder / "validation_split_record_indices.json"
 

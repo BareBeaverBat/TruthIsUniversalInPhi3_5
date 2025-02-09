@@ -1,7 +1,6 @@
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-import winsound
 
 
 import numpy as np
@@ -82,8 +81,8 @@ def solve_for_truth_polarity_vectors(
     with StdoutToLoggerRedirection(logger):
         ols_result = least_squares(loss_fun, init_truth_and_polarity_vects, verbose=2)
     num_secs_running_ols = time.time() - start_of_ols_ts
-    logger.debug(f"OLS for truth/polarity directions finished after {num_secs_running_ols // 60} min, {num_secs_running_ols % 60:.3f} sec")
-    winsound.PlaySound("SystemExclamation", winsound.SND_ALIAS)
+    logger.debug(f"OLS for truth/polarity directions finished after {num_secs_running_ols // 60} min, "
+                 f"{num_secs_running_ols % 60:.3f} sec")
     
     if not ols_result['success']:
         logger.error(f"problem while solving for truth and polarity directions: {ols_result['message']}")
