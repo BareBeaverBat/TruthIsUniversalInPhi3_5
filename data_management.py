@@ -1,6 +1,7 @@
 import json
 import os
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -14,12 +15,13 @@ from phi_3_5_constants import dsets_folder, finalized_activations_dir
 
 @dataclass
 class ProbeTrainScenario:
-    name: str
+    result_folder_name: str
+    scenario_name: str
     src_dset_idxs: list[int]
 
 
-# this will contain a list of the above data structure TODO make notebook which creates that list and saves it there
-train_scenarios_spec_path = "train_scenarios_spec.json"
+# this will contain a list of the above data structure
+train_scenarios_spec_path = Path(".") / "train_scenarios_spec.json"
 
 
 @dataclass
@@ -181,7 +183,7 @@ class ActivationsDataSelector:
                 DataComponents(scenario_validation_acts, scenario_validation_truth_labels,
                                scenario_validation_polarity_labels))
 
-    def grab_all_data_for_dset(self, dset_idx) -> DataComponents:
+    def grab_all_data_for_dset(self, dset_idx: int) -> DataComponents:
         assert dset_idx in self.dsets_index_df.index, f"{dset_idx} bad; options: {self.dsets_index_df.index.tolist()}"
         return DataComponents(self.all_dsets_activations[dset_idx], self.all_dsets_truth_labels[dset_idx],
                               self.all_dsets_polarity_labels[dset_idx])
