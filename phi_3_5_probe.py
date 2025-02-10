@@ -82,8 +82,6 @@ class LinearProbe(nn.Module):
 @dataclass
 class ProbesForDataset:
     lyr18_probe: PolarityAwareTruthProbe
-    lyr25_probe: PolarityAwareTruthProbe
-    lyrs18_and_25_probe: PolarityAwareTruthProbe
     lyr18_baseline_linear_probe: LinearProbe
 
 
@@ -290,18 +288,18 @@ def train_probe(
 def train_probes_for_dset(output_subfolder: str, output_nm_prefix: str, train_activs: torch.Tensor,
                           train_truth_labels: torch.Tensor, val_activs: torch.Tensor, val_truth_labels: torch.Tensor,
                           dset_dirs: DirVectors) -> ProbesForDataset:
-    assert 3 == train_activs.ndim == val_activs.ndim
+    assert 2 == train_activs.ndim == val_activs.ndim
     assert 2 == train_activs.shape[0] == val_activs.shape[0]
     assert 2 == train_truth_labels.ndim == val_truth_labels.ndim
     assert 1 == train_truth_labels.shape[1] == val_truth_labels.shape[1]
-    num_train_records = train_activs.shape[1]
+    num_train_records = train_activs.shape[0]
     assert num_train_records == train_truth_labels.shape[0]
-    num_val_records = val_activs.shape[1]
+    num_val_records = val_activs.shape[0]
     assert num_val_records == val_truth_labels.shape[0]    
     assert is_binary(train_truth_labels)
     assert is_binary(val_truth_labels)
-    activs_size = train_activs.shape[2]
-    assert activs_size == val_activs.shape[2] == dset_dirs.lyr18_mean_activ.shape[0]
+    activs_size = train_activs.shape[1]
+    assert activs_size == val_activs.shape[1] == dset_dirs.mean_activ.shape[0]
     if activs_size != hidden_state_size:
         logger.warning(f"dataset of activations isn't from phi 3.5 mini because activation size {activs_size} is wrong")
 
@@ -310,40 +308,20 @@ def train_probes_for_dset(output_subfolder: str, output_nm_prefix: str, train_ac
     output_folder.mkdir(exist_ok=True)
     baseline_output_folder.mkdir(exist_ok=True)
 
-    lyr18_train_activs = train_activs[0, :, :]
-    lyr25_train_activs = train_activs[1, :, :]
-    lyr18_val_activs = val_activs[0, :, :]
-    lyr25_val_activs = val_activs[1, :, :]
+    lyr18_train_activs = train_activs
+    lyr18_val_activs = val_activs
 
     retrieval_result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activs_size)
-    lyr18_probe, lyr25_probe = retrieval_result.lyr18_probe, retrieval_result.lyr25_probe
-    lyrs18_and_25_probe = retrieval_result.lyrs18_and_25_probe
+    lyr18_probe = retrieval_result.lyr18_probe
     lyr18_baseline_linear_probe = retrieval_result.lyr18_baseline_linear_probe
 
     if not lyr18_probe:
         logger.info(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} "
                     f"in the location {output_folder}")
-        lyr18_probe = PolarityAwareTruthProbe(dset_dirs.lyr18_mean_activ, dset_dirs.lyr18_truth_dir,
-                                              dset_dirs.lyr18_polarity_dir)
+        lyr18_probe = PolarityAwareTruthProbe(dset_dirs.mean_activ, dset_dirs.truth_dir,
+                                              dset_dirs.polarity_dir)
         train_probe(lyr18_train_activs, train_truth_labels, lyr18_val_activs, val_truth_labels, lyr18_probe)
         torch.save(lyr18_probe.state_dict(), retrieval_result.lyr18_probe_save_location)
-    if not lyr25_probe:
-        logger.info(f"training the layer25 probe for {num_train_records} records of data {output_nm_prefix} in the "
-                    f"location {output_folder}")
-        lyr25_probe = PolarityAwareTruthProbe(dset_dirs.lyr25_mean_activ, dset_dirs.lyr25_truth_dir,
-                                              dset_dirs.lyr25_polarity_dir)
-        train_probe(lyr25_train_activs, train_truth_labels, lyr25_val_activs, val_truth_labels, lyr25_probe)
-        torch.save(lyr25_probe.state_dict(), retrieval_result.lyr25_probe_save_location)
-    if not lyrs18_and_25_probe:
-        logger.info(f"training the layers18 and 25 probe for {num_train_records} records of data {output_nm_prefix} in "
-                    f"the location {output_folder}")
-        lyrs18_and_25_train_activs = torch.concat((lyr18_train_activs, lyr25_train_activs), dim=1)
-        lyrs18_and_25_val_activs = torch.concat((lyr18_val_activs, lyr25_val_activs), dim=1)
-        lyrs18_and_25_probe = PolarityAwareTruthProbe(
-            dset_dirs.lyrs18_and_25_mean_activ, dset_dirs.lyrs18_and_25_truth_dir, dset_dirs.lyrs18_and_25_polarity_dir)
-        train_probe(lyrs18_and_25_train_activs, train_truth_labels, lyrs18_and_25_val_activs, val_truth_labels,
-                    lyrs18_and_25_probe)
-        torch.save(lyrs18_and_25_probe.state_dict(), retrieval_result.lyrs18_and_25_probe_save_location)
 
     if not lyr18_baseline_linear_probe:
         logger.info(f"training the baseline linear probe for {num_train_records} records of data {output_nm_prefix} in "
@@ -353,7 +331,7 @@ def train_probes_for_dset(output_subfolder: str, output_nm_prefix: str, train_ac
                     lyr18_baseline_linear_probe)
         torch.save(lyr18_baseline_linear_probe.state_dict(), retrieval_result.lyr18_baseline_linear_probe_save_location)
 
-    return ProbesForDataset(lyr18_probe, lyr25_probe, lyrs18_and_25_probe, lyr18_baseline_linear_probe)
+    return ProbesForDataset(lyr18_probe, lyr18_baseline_linear_probe)
 
 
 def load_probes_for_dset(subfolder_for_dset_probes: str, output_nm_prefix: str, activations_size=hidden_state_size
@@ -362,31 +340,22 @@ def load_probes_for_dset(subfolder_for_dset_probes: str, output_nm_prefix: str, 
     baseline_output_folder = baseline_probes_folder / subfolder_for_dset_probes if subfolder_for_dset_probes \
         else baseline_probes_folder
 
-    retrieval_result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activations_size)
-    err_msg = (f"Couldn't load all probes for dataset; missing probes' locations:"
-               f"\n{'' if retrieval_result.lyr18_probe else retrieval_result.lyr18_probe_save_location}"
-               f"\n{'' if retrieval_result.lyr25_probe else retrieval_result.lyr25_probe_save_location}"
-               f"\n{'' if retrieval_result.lyrs18_and_25_probe else retrieval_result.lyrs18_and_25_probe_save_location}"
-               f"\n{'' if retrieval_result.lyr18_baseline_linear_probe else 
-                    retrieval_result.lyr18_baseline_linear_probe_save_location}")
-
-    if retrieval_result.lyr18_probe and retrieval_result.lyr25_probe and retrieval_result.lyrs18_and_25_probe \
-            and retrieval_result.lyr18_baseline_linear_probe:
-        return ProbesForDataset(retrieval_result.lyr18_probe, retrieval_result.lyr25_probe,
-                                retrieval_result.lyrs18_and_25_probe, retrieval_result.lyr18_baseline_linear_probe)
+    result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activations_size)
+    if result.lyr18_probe and result.lyr18_baseline_linear_probe:
+        return ProbesForDataset(result.lyr18_probe, result.lyr18_baseline_linear_probe)
     else:
-        raise FileNotFoundError(err_msg)
+        raise FileNotFoundError(
+            f"Couldn't load all probes for dataset; missing probes' locations:"
+            f"\n{'' if result.lyr18_probe else result.lyr18_probe_save_location}"
+            f"\n{'' if result.lyr18_baseline_linear_probe else result.lyr18_baseline_linear_probe_save_location}"
+        )
 
 
 @dataclass
 class ProbesForDatasetRetrievalResult:
     lyr18_probe: PolarityAwareTruthProbe | None
-    lyr25_probe: PolarityAwareTruthProbe | None
-    lyrs18_and_25_probe: PolarityAwareTruthProbe | None
     lyr18_baseline_linear_probe: LinearProbe | None
     lyr18_probe_save_location: Path
-    lyr25_probe_save_location: Path
-    lyrs18_and_25_probe_save_location: Path
     lyr18_baseline_linear_probe_save_location: Path
 
 
@@ -394,12 +363,9 @@ def try_load_dset_probes(dset_probes_folder: Path, dset_baseline_probes_folder: 
                          activations_size=hidden_state_size
                          ) -> ProbesForDatasetRetrievalResult:
     lyr18_probe_save_location = dset_probes_folder / f"{output_nm_prefix}_lyr18_probe.pth"
-    lyr25_probe_save_location = dset_probes_folder / f"{output_nm_prefix}_lyr25_probe.pth"
-    lyrs18_and_25_probe_save_location = dset_probes_folder / f"{output_nm_prefix}_lyrs18_and_25_probe.pth"
     lyr18_baseline_linear_probe_save_location = (dset_baseline_probes_folder /
                                                  f"{output_nm_prefix}_lyr18_baseline_linear_probe.pth")
-    retrieval_result = ProbesForDatasetRetrievalResult(None, None, None, None, lyr18_probe_save_location,
-                                                       lyr25_probe_save_location, lyrs18_and_25_probe_save_location,
+    retrieval_result = ProbesForDatasetRetrievalResult(None, None, lyr18_probe_save_location,
                                                        lyr18_baseline_linear_probe_save_location)
 
     if lyr18_probe_save_location.exists():
@@ -408,20 +374,6 @@ def try_load_dset_probes(dset_probes_folder: Path, dset_baseline_probes_folder: 
         lyr18_probe_state_dict = torch.load(lyr18_probe_save_location, weights_only=True)
         lyr18_probe.load_state_dict(lyr18_probe_state_dict)
         retrieval_result.lyr18_probe = lyr18_probe
-    if lyr25_probe_save_location.exists():
-        lyr25_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1),
-                                              torch.ones(activations_size, 1))
-        lyr25_probe_state_dict = torch.load(lyr25_probe_save_location, weights_only=True)
-        lyr25_probe.load_state_dict(lyr25_probe_state_dict)
-        retrieval_result.lyr25_probe = lyr25_probe
-    if lyrs18_and_25_probe_save_location.exists():
-        lyrs18_and_25_probe = PolarityAwareTruthProbe(torch.ones(2 * activations_size, 1),
-                                                      torch.ones(2 * activations_size, 1),
-                                                      torch.ones(2 * activations_size, 1))
-        lyrs18_and_25_probe_state_dict = torch.load(lyrs18_and_25_probe_save_location, weights_only=True)
-        lyrs18_and_25_probe.load_state_dict(lyrs18_and_25_probe_state_dict)
-        retrieval_result.lyrs18_and_25_probe = lyrs18_and_25_probe
-
     if lyr18_baseline_linear_probe_save_location.exists():
         lyr18_baseline_linear_probe = LinearProbe(torch.ones(activations_size, 1))
         lyr18_baseline_linear_probe_state_dict = torch.load(lyr18_baseline_linear_probe_save_location,
