@@ -1,88 +1,79 @@
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Any
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
-from numpy.typing import NDArray
+from jaxtyping import Float
 import torch.optim as optim
 import tqdm
-from torch.nn.modules.module import _IncompatibleKeys
+from typeguard import typechecked
 
-from direction_learning import DirVectors
+from data_management import DataComponents
+from direction_learning import learn_directions_for_dset
 from logging_setup import create_logger
 from phi_3_5_constants import hidden_state_size, device, probes_folder, baseline_probes_folder
 from utils import is_binary
 
 weight_decay_key = 'weight_decay'
-
 learn_rate_key = 'lr'
 
 logger = create_logger(__name__)
 
 
 class PolarityAwareTruthProbe(nn.Module):
-    def __init__(self, mean_activation: torch.Tensor, truth_dir: torch.Tensor, polarity_dir: torch.Tensor):
-        super().__init__()
-        assert 2 == mean_activation.ndim == truth_dir.ndim == polarity_dir.ndim
-        assert 1 == mean_activation.shape[1] == truth_dir.shape[1] == polarity_dir.shape[1]
-        self.activation_size = mean_activation.shape[0]
-        assert self.activation_size == truth_dir.shape[0] == polarity_dir.shape[0]
-        self.register_buffer('mean_activation', mean_activation)
-        self.register_buffer('truth_dir', truth_dir)
-        self.truth_dir_norm = np.linalg.norm(truth_dir)
-        self.register_buffer('polarity_dir', polarity_dir)
-        self.polarity_dir_norm = np.linalg.norm(polarity_dir)
 
-        self.output_w = nn.Linear(2*self.activation_size, 1, bias=False)
+    @typechecked
+    def __init__(self, truth_dir: Float[torch.Tensor, "act_sz 1"], polarity_dir: Float[torch.Tensor, "act_sz 1"]):
+        super().__init__()
+        truth_dir_norm = torch.linalg.vector_norm(truth_dir).item()
+        assert abs(truth_dir_norm-1) < 1e-8, f"truth direction not unit norm, instead norm is {truth_dir_norm}"
+        polarity_dir_norm = torch.linalg.vector_norm(polarity_dir).item()
+        assert abs(polarity_dir_norm-1) < 1e-8, f"polarity direction not unit norm, instead norm is {polarity_dir_norm}"
+        self.activation_size = truth_dir.shape[0]
+        self.register_buffer('truth_dir', truth_dir)
+        self.register_buffer('polarity_dir', polarity_dir)
+
+        self.output_w = nn.Linear(2, 1, bias=False)
         self.activ = nn.Sigmoid()
 
-    def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
-    ) -> _IncompatibleKeys:
-        problem_keys = super().load_state_dict(state_dict, strict, assign)
-        self.truth_dir_norm = np.linalg.norm(self.truth_dir)
-        self.polarity_dir_norm = np.linalg.norm(self.polarity_dir)
-        return problem_keys
+    @typechecked
+    def forward(self, x: Float[torch.Tensor, "batch act_sz"] | Float[torch.Tensor, "batch 2"],
+                is_already_projected=False):
+        projected_x: Float[torch.Tensor, "batch 2"]
 
-    def forward(self, x: torch.Tensor | NDArray):
-        assert 2 == x.ndim
-        assert self.activation_size == x.shape[1]
-        centered_data = x - self.mean_activation.T
-        truth_proj = ((centered_data @ self.truth_dir)/self.truth_dir_norm) * self.truth_dir.T
-        polarity_proj = ((centered_data @ self.polarity_dir)/self.polarity_dir_norm) * self.polarity_dir.T
-        
-        transformed_x = torch.concat((truth_proj, polarity_proj), dim=1)
-        return self.activ(self.output_w(transformed_x))
+        if is_already_projected:
+            assert x.shape[1] == 2, f"{x.shape}"
+            projected_x = x
+        else:
+            assert self.activation_size == x.shape[1], f"{x.shape}"
+            truth_proj_mag = x @ self.truth_dir.T
+            polarity_proj_mag = x @ self.polarity_dir.T
+            projected_x: Float[torch.Tensor, "batch 2"] = torch.concat((truth_proj_mag, polarity_proj_mag), dim=1)
+
+        return self.activ(self.output_w(projected_x))
 
 
 class LinearProbe(nn.Module):
-    # per page 7 of https://arxiv.org/pdf/2310.06824v3
-    #  "Since we are interested in truth directions, we always center our data and use unbiased probes"
-    # c.f. https://github.com/saprmarks/geometry-of-truth/blob/main/probes.py#L3
-    def __init__(self, mean_activation: torch.Tensor):
+    def __init__(self, activation_size: int):
         super().__init__()
-        assert 2 == mean_activation.ndim
-        assert 1 == mean_activation.shape[1]
-        self.activation_size = mean_activation.shape[0]
-        self.register_buffer('mean_activation', mean_activation)
+        self.activation_size = activation_size
 
         self.output_w = nn.Linear(self.activation_size, 1, bias=False)
         self.activ = nn.Sigmoid()
 
-    def forward(self, x: torch.Tensor | NDArray):
+    def forward(self, x: Float[torch.Tensor, "batch act_sz"]):
         assert 2 == x.ndim
         assert self.activation_size == x.shape[1]
-        centered_data = x - self.mean_activation.T
-        return self.activ(self.output_w(centered_data))
+        return self.activ(self.output_w(x))
 
 
 @dataclass
 class ProbesForDataset:
-    lyr18_probe: PolarityAwareTruthProbe
-    lyr18_baseline_linear_probe: LinearProbe
+    ttpd_probe: PolarityAwareTruthProbe
+    baseline_linear_probe: LinearProbe
 
 
 def get_optimizer_val(optimizer: torch.optim.Optimizer, param_key: str):
@@ -99,43 +90,37 @@ def shift_weight_decay_by(optimizer: torch.optim.Optimizer, offset: float):
         param_group[weight_decay_key] = offset + param_group[weight_decay_key]
 
 
+@typechecked
 def train_probe(
-        train_activations: torch.Tensor, train_truth_labels: torch.Tensor, val_activations: torch.Tensor,
-        val_truth_labels: torch.Tensor, probe: PolarityAwareTruthProbe | LinearProbe):
+        train_activs: Float[torch.Tensor, "n_t_recs act_sz"] | Float[torch.Tensor, "n_t_recs 2"],
+        train_truth_labels: Float[torch.Tensor, "n_t_recs 1"],
+        val_activs: Float[torch.Tensor, "n_v_recs act_sz"] | Float[torch.Tensor, "n_v_recs 2"],
+        val_truth_labels: Float[torch.Tensor, "n_v_recs 1"],
+        probe: PolarityAwareTruthProbe | LinearProbe, probe_fwd_kwargs: dict[str, Any] = None):
     """
     
     Credit to https://machinelearningmastery.com/building-a-binary-classification-truth_probe-in-pytorch/
-    :param train_activations:
+    :param train_activs:
     :param train_truth_labels:
-    :param val_activations:
+    :param val_activs:
     :param val_truth_labels:
     :param probe:
             The probe's weights/buffers will be moved back to the CPU before this function returns
+    :param probe_fwd_kwargs: extra keyword argument's for the probe's forward method
     """
-    mean_train_activ = probe.mean_activation
-    truth_dir = probe.truth_dir if isinstance(probe, PolarityAwareTruthProbe) else mean_train_activ
-    polarity_dir = probe.polarity_dir if isinstance(probe, PolarityAwareTruthProbe) else mean_train_activ
-    assert (2 == train_activations.ndim == val_activations.ndim == train_truth_labels.ndim == val_truth_labels.ndim
-            == mean_train_activ.ndim == truth_dir.ndim == polarity_dir.ndim)
-    assert (1 == train_truth_labels.shape[1] == val_truth_labels.shape[1] == mean_train_activ.shape[1]
-            == truth_dir.shape[1] == polarity_dir.shape[1])
-    num_train = train_activations.shape[0]
-    assert num_train == train_truth_labels.shape[0]
+    probe_fwd_kwargs = probe_fwd_kwargs or {}
+
     assert is_binary(train_truth_labels), "Not all train-set truth labels are 1 or 0"
     assert is_binary(val_truth_labels), "Not all validation-set truth labels are 1 or 0"
-    activ_vect_size = train_activations.shape[1]
-    assert (activ_vect_size == val_activations.shape[1] == mean_train_activ.shape[0] == truth_dir.shape[0]
-            == polarity_dir.shape[0])
-    if activ_vect_size % hidden_state_size != 0:
-        logger.warning(f"NOTE- not using phi 3.5 mini because activation vector size {activ_vect_size} is wrong")
-    num_val = val_activations.shape[0]
-    assert num_val == val_truth_labels.shape[0]
+    assert train_activs.shape[1] == val_activs.shape[1]
+    num_train = train_activs.shape[0]
+    num_val = val_activs.shape[0]
 
     probe.to(device)
     
-    gpu_train_activs = train_activations.to(device)
+    gpu_train_activs = train_activs.to(device)
     gpu_train_labels = train_truth_labels.to(device)
-    gpu_val_activs = val_activations.to(device)
+    gpu_val_activs = val_activs.to(device)
     gpu_val_labels = val_truth_labels.to(device)
     
     batch_size_factor = 1/16 if num_train < 50 else 1/2 if num_train < 100 else 1 if num_train < 500 \
@@ -191,7 +176,7 @@ def train_probe(
             bar.set_description(f"Epoch {epoch}")
             for start in bar:
                 batch_activs, batch_labels = gpu_train_activs[start:start+batch_size], gpu_train_labels[start:start+batch_size]
-                preds = probe(batch_activs)
+                preds = probe(batch_activs, **probe_fwd_kwargs)
                 loss = loss_fn(preds, batch_labels)
                 optimizer.zero_grad()
                 loss.backward()
@@ -202,7 +187,7 @@ def train_probe(
         # evaluate loss on validation set
         probe.eval()
         with torch.no_grad():
-            preds = probe(gpu_val_activs)
+            preds = probe(gpu_val_activs, **probe_fwd_kwargs)
             val_loss = loss_fn(preds, gpu_val_labels).item()
         
         is_better = all(val_loss < prev_few_losses)
@@ -275,7 +260,7 @@ def train_probe(
     # Compute final validation metrics
     probe.eval()
     with torch.no_grad():
-        preds = probe(gpu_val_activs)
+        preds = probe(gpu_val_activs, **probe_fwd_kwargs)
         final_val_loss = loss_fn(preds, gpu_val_labels).item()
         final_val_acc = (preds.round() == gpu_val_labels).float().mean().item()
     
@@ -285,21 +270,14 @@ def train_probe(
     probe.cpu()
 
 
-def train_probes_for_dset(output_subfolder: str, output_nm_prefix: str, train_activs: torch.Tensor,
-                          train_truth_labels: torch.Tensor, val_activs: torch.Tensor, val_truth_labels: torch.Tensor,
-                          dset_dirs: DirVectors) -> ProbesForDataset:
-    assert 2 == train_activs.ndim == val_activs.ndim
-    assert 2 == train_activs.shape[0] == val_activs.shape[0]
-    assert 2 == train_truth_labels.ndim == val_truth_labels.ndim
-    assert 1 == train_truth_labels.shape[1] == val_truth_labels.shape[1]
-    num_train_records = train_activs.shape[0]
-    assert num_train_records == train_truth_labels.shape[0]
-    num_val_records = val_activs.shape[0]
-    assert num_val_records == val_truth_labels.shape[0]    
-    assert is_binary(train_truth_labels)
-    assert is_binary(val_truth_labels)
-    activs_size = train_activs.shape[1]
-    assert activs_size == val_activs.shape[1] == dset_dirs.mean_activ.shape[0]
+@typechecked
+def train_probes_for_dset(
+        output_subfolder: str, output_nm_prefix: str, train_data: DataComponents, val_data: DataComponents
+) -> ProbesForDataset:
+    num_train_records = train_data.activations.shape[0]
+    assert is_binary(train_data.truth_labels)
+    assert is_binary(val_data.truth_labels)
+    activs_size = train_data.activations.shape[1]
     if activs_size != hidden_state_size:
         logger.warning(f"dataset of activations isn't from phi 3.5 mini because activation size {activs_size} is wrong")
 
@@ -308,30 +286,34 @@ def train_probes_for_dset(output_subfolder: str, output_nm_prefix: str, train_ac
     output_folder.mkdir(exist_ok=True)
     baseline_output_folder.mkdir(exist_ok=True)
 
-    lyr18_train_activs = train_activs
-    lyr18_val_activs = val_activs
-
     retrieval_result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activs_size)
-    lyr18_probe = retrieval_result.lyr18_probe
-    lyr18_baseline_linear_probe = retrieval_result.lyr18_baseline_linear_probe
+    ttpd_probe = retrieval_result.ttpd_probe
+    baseline_linear_probe = retrieval_result.baseline_linear_probe
 
-    if not lyr18_probe:
+    if not ttpd_probe:
         logger.info(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} "
                     f"in the location {output_folder}")
-        lyr18_probe = PolarityAwareTruthProbe(dset_dirs.mean_activ, dset_dirs.truth_dir,
-                                              dset_dirs.polarity_dir)
-        train_probe(lyr18_train_activs, train_truth_labels, lyr18_val_activs, val_truth_labels, lyr18_probe)
-        torch.save(lyr18_probe.state_dict(), retrieval_result.lyr18_probe_save_location)
+        dset_dirs = learn_directions_for_dset(train_data.activations, train_data.truth_labels,
+                                              train_data.polarity_labels)
 
-    if not lyr18_baseline_linear_probe:
+        projected_train_activs: Float[torch.Tensor, "n_t_recs 2"] = torch.cat(
+            (train_data.activations @ dset_dirs.truth_dir.T, train_data.activations @ dset_dirs.polarity_dir.T), dim=1)
+        projected_val_activs: Float[torch.Tensor, "n_v_recs 2"] = torch.cat(
+            (val_data.activations @ dset_dirs.truth_dir.T, val_data.activations @ dset_dirs.polarity_dir.T), dim=1)
+        ttpd_probe = PolarityAwareTruthProbe(dset_dirs.truth_dir, dset_dirs.polarity_dir)
+        train_probe(projected_train_activs, train_data.truth_labels, projected_val_activs, val_data.truth_labels,
+                    ttpd_probe, {"is_already_projected": True})
+        torch.save(ttpd_probe.state_dict(), retrieval_result.ttpd_probe_save_location)
+
+    if not baseline_linear_probe:
         logger.info(f"training the baseline linear probe for {num_train_records} records of data {output_nm_prefix} in "
                     f"the location {baseline_output_folder}")
-        lyr18_baseline_linear_probe = LinearProbe(torch.ones(activs_size, 1))
-        train_probe(lyr18_train_activs, train_truth_labels, lyr18_val_activs, val_truth_labels,
-                    lyr18_baseline_linear_probe)
-        torch.save(lyr18_baseline_linear_probe.state_dict(), retrieval_result.lyr18_baseline_linear_probe_save_location)
+        baseline_linear_probe = LinearProbe(activs_size)
+        train_probe(train_data.activations, train_data.truth_labels, val_data.activations, val_data.truth_labels,
+                    baseline_linear_probe)
+        torch.save(baseline_linear_probe.state_dict(), retrieval_result.baseline_linear_probe_save_location)
 
-    return ProbesForDataset(lyr18_probe, lyr18_baseline_linear_probe)
+    return ProbesForDataset(ttpd_probe, baseline_linear_probe)
 
 
 def load_probes_for_dset(subfolder_for_dset_probes: str, output_nm_prefix: str, activations_size=hidden_state_size
@@ -341,45 +323,44 @@ def load_probes_for_dset(subfolder_for_dset_probes: str, output_nm_prefix: str, 
         else baseline_probes_folder
 
     result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activations_size)
-    if result.lyr18_probe and result.lyr18_baseline_linear_probe:
-        return ProbesForDataset(result.lyr18_probe, result.lyr18_baseline_linear_probe)
+    if result.ttpd_probe and result.baseline_linear_probe:
+        return ProbesForDataset(result.ttpd_probe, result.baseline_linear_probe)
     else:
         raise FileNotFoundError(
             f"Couldn't load all probes for dataset; missing probes' locations:"
-            f"\n{'' if result.lyr18_probe else result.lyr18_probe_save_location}"
-            f"\n{'' if result.lyr18_baseline_linear_probe else result.lyr18_baseline_linear_probe_save_location}"
+            f"\n{'' if result.ttpd_probe else result.ttpd_probe_save_location}"
+            f"\n{'' if result.baseline_linear_probe else result.baseline_linear_probe_save_location}"
         )
 
 
 @dataclass
 class ProbesForDatasetRetrievalResult:
-    lyr18_probe: PolarityAwareTruthProbe | None
-    lyr18_baseline_linear_probe: LinearProbe | None
-    lyr18_probe_save_location: Path
-    lyr18_baseline_linear_probe_save_location: Path
+    ttpd_probe: PolarityAwareTruthProbe | None
+    baseline_linear_probe: LinearProbe | None
+    ttpd_probe_save_location: Path
+    baseline_linear_probe_save_location: Path
 
 
 def try_load_dset_probes(dset_probes_folder: Path, dset_baseline_probes_folder: Path, output_nm_prefix: str,
                          activations_size=hidden_state_size
                          ) -> ProbesForDatasetRetrievalResult:
-    lyr18_probe_save_location = dset_probes_folder / f"{output_nm_prefix}_lyr18_probe.pth"
-    lyr18_baseline_linear_probe_save_location = (dset_baseline_probes_folder /
-                                                 f"{output_nm_prefix}_lyr18_baseline_linear_probe.pth")
-    retrieval_result = ProbesForDatasetRetrievalResult(None, None, lyr18_probe_save_location,
-                                                       lyr18_baseline_linear_probe_save_location)
+    ttpd_probe_save_location = dset_probes_folder / f"{output_nm_prefix}_lyr18_probe.pth"
+    baseline_linear_probe_save_location = (dset_baseline_probes_folder /
+                                           f"{output_nm_prefix}_lyr18_baseline_linear_probe.pth")
+    retrieval_result = ProbesForDatasetRetrievalResult(None, None, ttpd_probe_save_location,
+                                                       baseline_linear_probe_save_location)
 
-    if lyr18_probe_save_location.exists():
-        lyr18_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1),
-                                              torch.ones(activations_size, 1))
-        lyr18_probe_state_dict = torch.load(lyr18_probe_save_location, weights_only=True)
-        lyr18_probe.load_state_dict(lyr18_probe_state_dict)
-        retrieval_result.lyr18_probe = lyr18_probe
-    if lyr18_baseline_linear_probe_save_location.exists():
-        lyr18_baseline_linear_probe = LinearProbe(torch.ones(activations_size, 1))
-        lyr18_baseline_linear_probe_state_dict = torch.load(lyr18_baseline_linear_probe_save_location,
-                                                            weights_only=True)
-        lyr18_baseline_linear_probe.load_state_dict(lyr18_baseline_linear_probe_state_dict)
-        retrieval_result.lyr18_baseline_linear_probe = lyr18_baseline_linear_probe
+    if ttpd_probe_save_location.exists():
+        ttpd_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1),
+                                             torch.ones(activations_size, 1))
+        ttpd_probe_state_dict = torch.load(ttpd_probe_save_location, weights_only=True)
+        ttpd_probe.load_state_dict(ttpd_probe_state_dict)
+        retrieval_result.ttpd_probe = ttpd_probe
+    if baseline_linear_probe_save_location.exists():
+        baseline_linear_probe = LinearProbe(activations_size)
+        baseline_linear_probe_state_dict = torch.load(baseline_linear_probe_save_location, weights_only=True)
+        baseline_linear_probe.load_state_dict(baseline_linear_probe_state_dict)
+        retrieval_result.baseline_linear_probe = baseline_linear_probe
 
     return retrieval_result
 

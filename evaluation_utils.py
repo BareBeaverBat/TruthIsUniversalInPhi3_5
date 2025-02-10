@@ -304,7 +304,7 @@ def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch
     assert activations.shape[1] == truth_labels.shape[0]
     assert truth_labels.shape[1] == 1
     assert is_binary(truth_labels)
-    assert activations.shape[2] == probes.lyr18_probe.activation_size
+    assert activations.shape[2] == probes.ttpd_probe.activation_size
 
     lyr18_probe_metrics = ConfusionMetrics(threshold)
     lyr25_probe_metrics = ConfusionMetrics(threshold)
@@ -316,11 +316,11 @@ def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch
     lyr25_activs = activations[1, :, :]
     lyrs18_and_25_activs = torch.cat((lyr18_activs, lyr25_activs), dim=1)
 
-    lyr18_probe_preds = probes.lyr18_probe(lyr18_activs).detach()
+    lyr18_probe_preds = probes.ttpd_probe(lyr18_activs).detach()
     lyr25_probe_preds = probes.lyr25_probe(lyr25_activs).detach()
     lyrs18_and_25_probe_preds = probes.lyrs18_and_25_probe(lyrs18_and_25_activs).detach()
 
-    lyr18_baseline_linear_probe_preds = probes.lyr18_baseline_linear_probe(lyr18_activs).detach()
+    lyr18_baseline_linear_probe_preds = probes.baseline_linear_probe(lyr18_activs).detach()
 
     labels_np = truth_labels.numpy()
 

@@ -31,7 +31,13 @@ class DirVectors:
     def __post_init__(self):
         check_type(self.mean_activ, Float[t.Tensor, "vect_sz 1"])
         check_type(self.truth_dir, Float[t.Tensor, "vect_sz 1"])
+        truth_dir_norm = t.linalg.vector_norm(self.truth_dir).item()
+        if abs(truth_dir_norm - 1) > 1e-8:
+            raise ValueError(f"truth direction should have unit norm, instead: {truth_dir_norm}")
         check_type(self.polarity_dir, Float[t.Tensor, "vect_sz 1"])
+        polarity_dir_norm = t.linalg.vector_norm(self.polarity_dir).item()
+        if abs(polarity_dir_norm-1) > 1e-8:
+            raise ValueError(f"polarity direction should have unit norm, instead: {truth_dir_norm}")
 
 
 @typechecked
@@ -55,6 +61,7 @@ def learn_directions_for_dset(
     jointly_learned_truth_polarity_dirs: Float[t.Tensor, "2 vect_sz"] = (
             t.linalg.inv(Y.T @ Y) @ Y.T @ centered_activations_data)
     truth_dir: Float[t.Tensor, "vect_sz 1"] = jointly_learned_truth_polarity_dirs[0, :, None]
+    truth_dir = truth_dir / t.linalg.vector_norm(truth_dir)
     # following Bürger et al. in discarding jointly learned polarity direction
     
     binary_polarity_labels: Float[t.Tensor, "n_records 1"] = t.where(
@@ -63,6 +70,7 @@ def learn_directions_for_dset(
     polarity_lin_classif = LogisticRegression(penalty=None, fit_intercept=True)
     polarity_lin_classif.fit(train_activs.numpy(), binary_polarity_labels.numpy())
     polarity_dir: Float[t.Tensor, "vect_sz 1"] = t.from_numpy(polarity_lin_classif.coef_).T
+    polarity_dir = polarity_dir / t.linalg.vector_norm(polarity_dir)
 
     return DirVectors(mean_train_activ, truth_dir, polarity_dir)
 

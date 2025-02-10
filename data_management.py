@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 from jaxtyping import Float
 from pandas.core.dtypes.common import is_integer_dtype
+from typeguard import check_type, typechecked
 
 from phi_3_5_constants import dsets_folder, finalized_activations_dir
 
@@ -53,6 +54,11 @@ class DataComponents:
     activations: Float[torch.Tensor, "_dset_sz act_sz"]
     truth_labels: Float[torch.Tensor, "_dset_sz 1"]
     polarity_labels: Float[torch.Tensor, "_dset_sz 1"]
+
+    def __post_init__(self):
+        check_type(self.activations, Float[torch.Tensor, "dset_sz act_sz"])
+        check_type(self.truth_labels, Float[torch.Tensor, "dset_sz 1"])
+        check_type(self.polarity_labels, Float[torch.Tensor, "dset_sz 1"])
 
 
 class ActivationsDataSelector:
@@ -140,6 +146,7 @@ class ActivationsDataSelector:
             self.all_dsets_activations[dset_idx] = lyr18_activations
         assert all([len(idxs_of_6way_topic) == 6 for idxs_of_6way_topic in self.dset_idxs_for_6way_topics.values()])
 
+    @typechecked
     def select_train_validation_for_scenario(self, scenario_dset_idxs: list[int], split_variant_idx: int
                                              ) -> tuple[DataComponents, DataComponents]:
         assert all([dset_idx in self.dsets_index_df.index for dset_idx in scenario_dset_idxs])
@@ -167,16 +174,16 @@ class ActivationsDataSelector:
             scenario_train_polarity_labels_lst.append(dset_polarity_labels[curr_split.train_idxs, :])
             scenario_validation_polarity_labels_lst.append(dset_polarity_labels[curr_split.validation_idxs, :])
 
-        scenario_train_acts: Float[torch.Tensor, "_combined_t_dset_sz act_sz"] = torch.cat(scenario_train_acts_lst)
-        scenario_validation_acts: Float[torch.Tensor, "_combined_v_dset_sz act_sz"] = torch.cat(
+        scenario_train_acts: Float[torch.Tensor, "combined_t_dset_sz act_sz"] = torch.cat(scenario_train_acts_lst)
+        scenario_validation_acts: Float[torch.Tensor, "combined_v_dset_sz act_sz"] = torch.cat(
             scenario_validation_acts_lst)
-        scenario_train_truth_labels: Float[torch.Tensor, "_combined_t_dset_sz 1"] = torch.cat(
+        scenario_train_truth_labels: Float[torch.Tensor, "combined_t_dset_sz 1"] = torch.cat(
             scenario_train_truth_labels_lst)
-        scenario_validation_truth_labels: Float[torch.Tensor, "_combined_v_dset_sz 1"] = torch.cat(
+        scenario_validation_truth_labels: Float[torch.Tensor, "combined_v_dset_sz 1"] = torch.cat(
             scenario_validation_truth_labels_lst)
-        scenario_train_polarity_labels: Float[torch.Tensor, "_combined_t_dset_sz 1"] = torch.cat(
+        scenario_train_polarity_labels: Float[torch.Tensor, "combined_t_dset_sz 1"] = torch.cat(
             scenario_train_polarity_labels_lst)
-        scenario_validation_polarity_labels: Float[torch.Tensor, "_combined_v_dset_sz 1"] = torch.cat(
+        scenario_validation_polarity_labels: Float[torch.Tensor, "combined_v_dset_sz 1"] = torch.cat(
             scenario_validation_polarity_labels_lst)
 
         return (DataComponents(scenario_train_acts, scenario_train_truth_labels, scenario_train_polarity_labels),
