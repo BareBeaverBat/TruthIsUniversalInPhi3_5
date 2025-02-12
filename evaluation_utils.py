@@ -1,9 +1,11 @@
 import json
 
 import torch
+from jaxtyping import Float
+from typeguard import typechecked
 
 from logging_setup import create_logger
-from phi_3_5_probe import ProbesForDataset
+from phi_3_5_probe import ProbesForScenario
 
 import numpy as np
 from dataclasses import dataclass
@@ -235,16 +237,12 @@ class MetricsForDatasetProbes:
     activations.
     """
     lyr18_probe_metrics: ConfusionMetrics
-    lyr25_probe_metrics: ConfusionMetrics
-    lyrs18_and_25_probe_metrics: ConfusionMetrics
     lyr18_baseline_linear_probe_metrics: ConfusionMetrics
 
     def to_dict(self) -> dict:
         """Serialize metrics to dictionary"""
         return {
             "lyr18_probe_metrics": self.lyr18_probe_metrics.to_dict(),
-            "lyr25_probe_metrics": self.lyr25_probe_metrics.to_dict(),
-            "lyrs18_and_25_probe_metrics": self.lyrs18_and_25_probe_metrics.to_dict(),
             "lyr18_baseline_linear_probe_metrics": self.lyr18_baseline_linear_probe_metrics.to_dict()
         }
 
@@ -257,8 +255,6 @@ class MetricsForDatasetProbes:
         """Create MetricsForDatasetProbes instance from dictionary"""
         return cls(
             lyr18_probe_metrics=ConfusionMetrics.from_dict(data['lyr18_probe_metrics']),
-            lyr25_probe_metrics=ConfusionMetrics.from_dict(data['lyr25_probe_metrics']),
-            lyrs18_and_25_probe_metrics=ConfusionMetrics.from_dict(data['lyrs18_and_25_probe_metrics']),
             lyr18_baseline_linear_probe_metrics=ConfusionMetrics.from_dict(data['lyr18_baseline_linear_probe_metrics'])
         )
 
@@ -275,17 +271,16 @@ class MetricsForDatasetProbes:
         """
         combined = cls(
             lyr18_probe_metrics=ConfusionMetrics.combine(*[m.lyr18_probe_metrics for m in dsets_metrics]),
-            lyr25_probe_metrics=ConfusionMetrics.combine(*[m.lyr25_probe_metrics for m in dsets_metrics]),
-            lyrs18_and_25_probe_metrics=
-            ConfusionMetrics.combine(*[m.lyrs18_and_25_probe_metrics for m in dsets_metrics]),
             lyr18_baseline_linear_probe_metrics=
             ConfusionMetrics.combine(*[m.lyr18_baseline_linear_probe_metrics for m in dsets_metrics])
         )
         return combined
 
 
-def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch.Tensor, truth_labels: torch.Tensor,
-                                    threshold=0.5) -> MetricsForDatasetProbes:
+@typechecked
+def evaluate_classifier_performance(probes: ProbesForScenario, activations: Float[torch.Tensor, "n_recs act_sz"],
+                                    truth_labels: Float[torch.Tensor, "n_recs 1"], threshold=0.5
+                                    ) -> MetricsForDatasetProbes:
     """
     Evaluate the performance of a classifier on some segment of some dataset
 
@@ -298,41 +293,19 @@ def evaluate_classifier_performance(probes: ProbesForDataset, activations: torch
         MetricsForDatasetProbes: Metrics for the classifier's performance on (the given segment of) the dataset
 
     """
-    assert 3 == activations.ndim
-    assert 2 == truth_labels.ndim
-    assert activations.shape[0] == 2
-    assert activations.shape[1] == truth_labels.shape[0]
-    assert truth_labels.shape[1] == 1
     assert is_binary(truth_labels)
-    assert activations.shape[2] == probes.ttpd_probe.activation_size
+    assert activations.shape[1] == probes.ttpd_probe.activation_size == probes.baseline_linear_probe.activation_size
 
     lyr18_probe_metrics = ConfusionMetrics(threshold)
-    lyr25_probe_metrics = ConfusionMetrics(threshold)
-    lyrs18_and_25_probe_metrics = ConfusionMetrics(threshold)
-
     lyr18_baseline_linear_probe_metrics = ConfusionMetrics(threshold)
 
-    lyr18_activs = activations[0, :, :]
-    lyr25_activs = activations[1, :, :]
-    lyrs18_and_25_activs = torch.cat((lyr18_activs, lyr25_activs), dim=1)
-
-    lyr18_probe_preds = probes.ttpd_probe(lyr18_activs).detach()
-    lyr25_probe_preds = probes.lyr25_probe(lyr25_activs).detach()
-    lyrs18_and_25_probe_preds = probes.lyrs18_and_25_probe(lyrs18_and_25_activs).detach()
-
-    lyr18_baseline_linear_probe_preds = probes.baseline_linear_probe(lyr18_activs).detach()
+    lyr18_probe_preds = probes.ttpd_probe(activations).detach()
+    lyr18_baseline_linear_probe_preds = probes.baseline_linear_probe(activations).detach()
 
     labels_np = truth_labels.numpy()
-
     lyr18_probe_metrics.update(labels_np, lyr18_probe_preds.numpy())
-    lyr25_probe_metrics.update(labels_np, lyr25_probe_preds.numpy())
-    lyrs18_and_25_probe_metrics.update(labels_np, lyrs18_and_25_probe_preds.numpy())
-
     lyr18_baseline_linear_probe_metrics.update(labels_np, lyr18_baseline_linear_probe_preds.numpy())
 
     return MetricsForDatasetProbes(
-        lyr18_probe_metrics=lyr18_probe_metrics,
-        lyr25_probe_metrics=lyr25_probe_metrics,
-        lyrs18_and_25_probe_metrics=lyrs18_and_25_probe_metrics,
-        lyr18_baseline_linear_probe_metrics=lyr18_baseline_linear_probe_metrics
+        lyr18_probe_metrics=lyr18_probe_metrics, lyr18_baseline_linear_probe_metrics=lyr18_baseline_linear_probe_metrics
     )

@@ -71,7 +71,7 @@ class LinearProbe(nn.Module):
 
 
 @dataclass
-class ProbesForDataset:
+class ProbesForScenario:
     ttpd_probe: PolarityAwareTruthProbe
     baseline_linear_probe: LinearProbe
 
@@ -272,8 +272,8 @@ def train_probe(
 
 @typechecked
 def train_probes_for_dset(
-        output_subfolder: str, output_nm_prefix: str, train_data: DataComponents, val_data: DataComponents
-) -> ProbesForDataset:
+        output_subfolder: str, output_nm_prefix: str, split_variant_idx: int, train_data: DataComponents,
+        val_data: DataComponents) -> ProbesForScenario:
     num_train_records = train_data.activations.shape[0]
     assert is_binary(train_data.truth_labels)
     assert is_binary(val_data.truth_labels)
@@ -283,10 +283,8 @@ def train_probes_for_dset(
 
     output_folder = probes_folder / output_subfolder if output_subfolder else probes_folder
     baseline_output_folder = baseline_probes_folder / output_subfolder if output_subfolder else baseline_probes_folder
-    output_folder.mkdir(exist_ok=True)
-    baseline_output_folder.mkdir(exist_ok=True)
-
-    retrieval_result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activs_size)
+    retrieval_result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, split_variant_idx,
+                                            activs_size)
     ttpd_probe = retrieval_result.ttpd_probe
     baseline_linear_probe = retrieval_result.baseline_linear_probe
 
@@ -303,6 +301,7 @@ def train_probes_for_dset(
         ttpd_probe = PolarityAwareTruthProbe(dset_dirs.truth_dir, dset_dirs.polarity_dir)
         train_probe(projected_train_activs, train_data.truth_labels, projected_val_activs, val_data.truth_labels,
                     ttpd_probe, {"is_already_projected": True})
+        retrieval_result.ttpd_probe_save_location.parent.mkdir(parents=True, exist_ok=True)
         torch.save(ttpd_probe.state_dict(), retrieval_result.ttpd_probe_save_location)
 
     if not baseline_linear_probe:
@@ -311,20 +310,23 @@ def train_probes_for_dset(
         baseline_linear_probe = LinearProbe(activs_size)
         train_probe(train_data.activations, train_data.truth_labels, val_data.activations, val_data.truth_labels,
                     baseline_linear_probe)
+        retrieval_result.baseline_linear_probe_save_location.parent.mkdir(parents=True, exist_ok=True)
         torch.save(baseline_linear_probe.state_dict(), retrieval_result.baseline_linear_probe_save_location)
 
-    return ProbesForDataset(ttpd_probe, baseline_linear_probe)
+    return ProbesForScenario(ttpd_probe, baseline_linear_probe)
 
 
-def load_probes_for_dset(subfolder_for_dset_probes: str, output_nm_prefix: str, activations_size=hidden_state_size
-                         ) -> ProbesForDataset:
+def load_probes_for_dset(subfolder_for_dset_probes: str, output_nm_prefix: str, split_variant_idx: int,
+                         activations_size=hidden_state_size
+                         ) -> ProbesForScenario:
     output_folder = probes_folder / subfolder_for_dset_probes if subfolder_for_dset_probes else probes_folder
     baseline_output_folder = baseline_probes_folder / subfolder_for_dset_probes if subfolder_for_dset_probes \
         else baseline_probes_folder
 
-    result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, activations_size)
+    result = try_load_dset_probes(output_folder, baseline_output_folder, output_nm_prefix, split_variant_idx,
+                                  activations_size)
     if result.ttpd_probe and result.baseline_linear_probe:
-        return ProbesForDataset(result.ttpd_probe, result.baseline_linear_probe)
+        return ProbesForScenario(result.ttpd_probe, result.baseline_linear_probe)
     else:
         raise FileNotFoundError(
             f"Couldn't load all probes for dataset; missing probes' locations:"
@@ -342,17 +344,19 @@ class ProbesForDatasetRetrievalResult:
 
 
 def try_load_dset_probes(dset_probes_folder: Path, dset_baseline_probes_folder: Path, output_nm_prefix: str,
-                         activations_size=hidden_state_size
+                         split_variant_idx: int, activations_size=hidden_state_size
                          ) -> ProbesForDatasetRetrievalResult:
-    ttpd_probe_save_location = dset_probes_folder / f"{output_nm_prefix}_lyr18_probe.pth"
-    baseline_linear_probe_save_location = (dset_baseline_probes_folder /
-                                           f"{output_nm_prefix}_lyr18_baseline_linear_probe.pth")
+    ttpd_probe_save_location = (
+            dset_probes_folder / f"{output_nm_prefix}_lyr18_probe" / f"split-variant-{split_variant_idx}.pth")
+    baseline_linear_probe_save_location = (
+            dset_baseline_probes_folder / f"{output_nm_prefix}_lyr18_baseline_linear_probe"
+            / f"split-variant-{split_variant_idx}.pth")
+
     retrieval_result = ProbesForDatasetRetrievalResult(None, None, ttpd_probe_save_location,
                                                        baseline_linear_probe_save_location)
 
     if ttpd_probe_save_location.exists():
-        ttpd_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1),
-                                             torch.ones(activations_size, 1))
+        ttpd_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1))
         ttpd_probe_state_dict = torch.load(ttpd_probe_save_location, weights_only=True)
         ttpd_probe.load_state_dict(ttpd_probe_state_dict)
         retrieval_result.ttpd_probe = ttpd_probe

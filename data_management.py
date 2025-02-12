@@ -20,6 +20,9 @@ class ProbeTrainScenario:
     scenario_name: str
     src_dset_idxs: list[int]
 
+    def scenario_key(self) -> tuple[int, ...]:
+        return tuple(sorted(self.src_dset_idxs))
+
 
 # this will contain a list of the above data structure
 train_scenarios_spec_path = Path(".") / "train_scenarios_spec.json"
@@ -39,7 +42,7 @@ def save_train_validation_splits(train_valid_splits_spec: dict[int, list[TrainVa
         json.dump({
             str(dset_idx): list(map(asdict, dset_split_specs))
             for dset_idx, dset_split_specs in train_valid_splits_spec.items()
-        }, f)
+        }, f)  # todo add indent=2 when rerunning this with 20 splits, but revert that if resulting file is too huge
 
 
 def load_train_validation_splits() -> dict[int, list[TrainValidationSplitsIdxs]]:
