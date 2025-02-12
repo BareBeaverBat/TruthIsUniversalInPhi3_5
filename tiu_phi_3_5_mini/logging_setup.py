@@ -9,7 +9,7 @@ fmtr = logging.Formatter("%(asctime)s;%(name)s;%(levelname)s:%(message)s")
 console_handler = StreamHandler(sys.stdout)
 console_handler.setFormatter(fmtr)
 console_handler.setLevel(logging.INFO)
-file_handler = TimedRotatingFileHandler("probe_train_logging.log", when="D", backupCount=14, encoding="utf-8")
+file_handler = TimedRotatingFileHandler("../probe_train_logging.log", when="D", backupCount=14, encoding="utf-8")
 file_handler.setFormatter(fmtr)
 file_handler.setLevel(logging.DEBUG)
 

@@ -26,7 +26,7 @@ class ProbeTrainScenario:
 
 
 # this will contain a list of the above data structure
-train_scenarios_spec_path = Path(".") / "train_scenarios_spec.json"
+train_scenarios_spec_path = Path("..") / "train_scenarios_spec.json"
 
 
 @dataclass
