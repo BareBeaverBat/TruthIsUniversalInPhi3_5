@@ -4,7 +4,8 @@ import numpy as np
 import torch as t
 from jaxtyping import Float
 from sklearn.linear_model import LogisticRegression
-from typeguard import typechecked, check_type
+from beartype import beartype
+from beartype.door import die_if_unbearable
 
 from data_management import DataComponents
 from logging_setup import create_logger
@@ -29,11 +30,11 @@ class DirVectors:
     polarity_dir: Float[t.Tensor, "vect_sz 1"]
     
     def __post_init__(self):
-        check_type(self.truth_dir, Float[t.Tensor, "vect_sz 1"])
+        die_if_unbearable(self.truth_dir, Float[t.Tensor, "vect_sz 1"])
         truth_dir_norm = t.linalg.vector_norm(self.truth_dir).item()
         if abs(truth_dir_norm - 1) > 1e-8:
             raise ValueError(f"truth direction should have unit norm, instead: {truth_dir_norm}")
-        check_type(self.polarity_dir, Float[t.Tensor, "vect_sz 1"])
+        die_if_unbearable(self.polarity_dir, Float[t.Tensor, "vect_sz 1"])
         polarity_dir_norm = t.linalg.vector_norm(self.polarity_dir).item()
         if abs(polarity_dir_norm-1) > 1e-8:
             raise ValueError(f"polarity direction should have unit norm, instead: {truth_dir_norm}")
@@ -43,7 +44,7 @@ class DirVectors:
         return cls(ttpd_probe.truth_dir, ttpd_probe.polarity_dir)
 
 
-@typechecked
+@beartype
 def learn_directions_for_dset(
         train_activs: Float[t.Tensor, "n_t_records vect_sz"],
         train_truth_labels: Float[t.Tensor, "n_t_records 1"],
@@ -88,7 +89,7 @@ class ReconLosses:
     validation_mean_activ_and_t_p_dirs_loss_on_validation: float
 
 
-@typechecked
+@beartype
 def record_count_normalized_recon_loss(
         activations_data: Float[t.Tensor, "n_records vect_sz"], truth_labels: Float[t.Tensor, "n_records 1"],
         polarity_labels: Float[t.Tensor, "n_records 1"], estimated_vects: DirVectors,
@@ -108,7 +109,7 @@ def record_count_normalized_recon_loss(
     return loss_per_record_with_just_mean_activ, loss_per_record
 
 
-@typechecked
+@beartype
 def compute_recon_losses(
         dir_vects_from_train: DirVectors, train_data: DataComponents, val_data: DataComponents) -> ReconLosses:
     assert is_binary(train_data.truth_labels), "Not all train-set truth labels are 1 or 0"

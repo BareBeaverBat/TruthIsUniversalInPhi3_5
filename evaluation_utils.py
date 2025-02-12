@@ -2,7 +2,7 @@ import json
 
 import torch
 from jaxtyping import Float
-from typeguard import typechecked
+from beartype import beartype
 
 from logging_setup import create_logger
 from phi_3_5_probe import ProbesForScenario
@@ -277,7 +277,7 @@ class MetricsForDatasetProbes:
         return combined
 
 
-@typechecked
+@beartype
 def evaluate_classifier_performance(probes: ProbesForScenario, activations: Float[torch.Tensor, "n_recs act_sz"],
                                     truth_labels: Float[torch.Tensor, "n_recs 1"], threshold=0.5
                                     ) -> MetricsForDatasetProbes:

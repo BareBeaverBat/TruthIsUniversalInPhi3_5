@@ -9,7 +9,8 @@ import pandas as pd
 import torch
 from jaxtyping import Float
 from pandas.core.dtypes.common import is_integer_dtype
-from typeguard import check_type, typechecked
+from beartype import beartype
+from beartype.door import die_if_unbearable
 
 from phi_3_5_constants import dsets_folder, finalized_activations_dir
 
@@ -59,9 +60,9 @@ class DataComponents:
     polarity_labels: Float[torch.Tensor, "_dset_sz 1"]
 
     def __post_init__(self):
-        check_type(self.activations, Float[torch.Tensor, "dset_sz act_sz"])
-        check_type(self.truth_labels, Float[torch.Tensor, "dset_sz 1"])
-        check_type(self.polarity_labels, Float[torch.Tensor, "dset_sz 1"])
+        die_if_unbearable(self.activations, Float[torch.Tensor, "dset_sz act_sz"])
+        die_if_unbearable(self.truth_labels, Float[torch.Tensor, "dset_sz 1"])
+        die_if_unbearable(self.polarity_labels, Float[torch.Tensor, "dset_sz 1"])
 
 
 class ActivationsDataSelector:
@@ -149,7 +150,7 @@ class ActivationsDataSelector:
             self.all_dsets_activations[dset_idx] = lyr18_activations
         assert all([len(idxs_of_6way_topic) == 6 for idxs_of_6way_topic in self.dset_idxs_for_6way_topics.values()])
 
-    @typechecked
+    @beartype
     def select_train_validation_for_scenario(self, scenario_dset_idxs: list[int], split_variant_idx: int
                                              ) -> tuple[DataComponents, DataComponents]:
         assert all([dset_idx in self.dsets_index_df.index for dset_idx in scenario_dset_idxs])

@@ -9,7 +9,7 @@ import torch.nn as nn
 from jaxtyping import Float
 import torch.optim as optim
 import tqdm
-from typeguard import typechecked
+from beartype import beartype
 
 from data_management import DataComponents
 from direction_learning import learn_directions_for_dset
@@ -25,7 +25,7 @@ logger = create_logger(__name__)
 
 class PolarityAwareTruthProbe(nn.Module):
 
-    @typechecked
+    @beartype
     def __init__(self, truth_dir: Float[torch.Tensor, "act_sz 1"], polarity_dir: Float[torch.Tensor, "act_sz 1"]):
         super().__init__()
         truth_dir_norm = torch.linalg.vector_norm(truth_dir).item()
@@ -39,7 +39,7 @@ class PolarityAwareTruthProbe(nn.Module):
         self.output_w = nn.Linear(2, 1, bias=False)
         self.activ = nn.Sigmoid()
 
-    @typechecked
+    @beartype
     def forward(self, x: Float[torch.Tensor, "batch act_sz"] | Float[torch.Tensor, "batch 2"],
                 is_already_projected=False):
         projected_x: Float[torch.Tensor, "batch 2"]
@@ -90,7 +90,7 @@ def shift_weight_decay_by(optimizer: torch.optim.Optimizer, offset: float):
         param_group[weight_decay_key] = offset + param_group[weight_decay_key]
 
 
-@typechecked
+@beartype
 def train_probe(
         train_activs: Float[torch.Tensor, "n_t_recs act_sz"] | Float[torch.Tensor, "n_t_recs 2"],
         train_truth_labels: Float[torch.Tensor, "n_t_recs 1"],
@@ -270,7 +270,7 @@ def train_probe(
     probe.cpu()
 
 
-@typechecked
+@beartype
 def train_probes_for_dset(
         output_subfolder: str, output_nm_prefix: str, split_variant_idx: int, train_data: DataComponents,
         val_data: DataComponents) -> ProbesForScenario:
