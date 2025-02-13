@@ -9,13 +9,12 @@ import torch.nn as nn
 from jaxtyping import Float
 import torch.optim as optim
 import tqdm
-from beartype import beartype
 
-from data_management import DataComponents
-from direction_learning import learn_directions_for_dset
-from logging_setup import create_logger
-from phi_3_5_constants import hidden_state_size, device, probes_folder, baseline_probes_folder
-from utils import is_binary
+from .data_management import DataComponents
+from .direction_learning import learn_directions_for_dset
+from .logging_setup import create_logger
+from .phi_3_5_constants import hidden_state_size, device, probes_folder, baseline_probes_folder
+from .utils import is_binary, bear_jax_typed
 
 weight_decay_key = 'weight_decay'
 learn_rate_key = 'lr'
@@ -25,7 +24,7 @@ logger = create_logger(__name__)
 
 class PolarityAwareTruthProbe(nn.Module):
 
-    @beartype
+    @bear_jax_typed
     def __init__(self, truth_dir: Float[torch.Tensor, "act_sz 1"], polarity_dir: Float[torch.Tensor, "act_sz 1"]):
         super().__init__()
         truth_dir_norm = torch.linalg.vector_norm(truth_dir).item()
@@ -39,13 +38,13 @@ class PolarityAwareTruthProbe(nn.Module):
         self.output_w = nn.Linear(2, 1, bias=False)
         self.activ = nn.Sigmoid()
 
-    @beartype
+    @bear_jax_typed
     def forward(self, x: Float[torch.Tensor, "batch act_sz"] | Float[torch.Tensor, "batch 2"],
                 is_already_projected=False):
         projected_x: Float[torch.Tensor, "batch 2"]
 
         if is_already_projected:
-            assert x.shape[1] == 2, f"{x.shape}"
+            assert x.shape[1] == 2, f"{x.shape}"  # TODO test whether this assert is still needed after beartype added
             projected_x = x
         else:
             assert self.activation_size == x.shape[1], f"{x.shape}"
@@ -90,7 +89,7 @@ def shift_weight_decay_by(optimizer: torch.optim.Optimizer, offset: float):
         param_group[weight_decay_key] = offset + param_group[weight_decay_key]
 
 
-@beartype
+@bear_jax_typed
 def train_probe(
         train_activs: Float[torch.Tensor, "n_t_recs act_sz"] | Float[torch.Tensor, "n_t_recs 2"],
         train_truth_labels: Float[torch.Tensor, "n_t_recs 1"],
@@ -270,7 +269,7 @@ def train_probe(
     probe.cpu()
 
 
-@beartype
+@bear_jax_typed
 def train_probes_for_dset(
         output_subfolder: str, output_nm_prefix: str, split_variant_idx: int, train_data: DataComponents,
         val_data: DataComponents) -> ProbesForScenario:

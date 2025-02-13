@@ -4,14 +4,13 @@ import numpy as np
 import torch as t
 from jaxtyping import Float
 from sklearn.linear_model import LogisticRegression
-from beartype import beartype
 from beartype.door import die_if_unbearable
 
-from data_management import DataComponents
-from logging_setup import create_logger
-from phi_3_5_constants import hidden_state_size
-from phi_3_5_probe import PolarityAwareTruthProbe
-from utils import is_binary, is_bipolar
+from .data_management import DataComponents
+from .logging_setup import create_logger
+from .phi_3_5_constants import hidden_state_size
+from .phi_3_5_probe import PolarityAwareTruthProbe
+from .utils import is_binary, is_bipolar, bear_jax_typed
 
 logger = create_logger(__name__)
 
@@ -28,7 +27,8 @@ def neg1_t() -> Float[t.Tensor, ""]:
 class DirVectors:
     truth_dir: Float[t.Tensor, "vect_sz 1"]
     polarity_dir: Float[t.Tensor, "vect_sz 1"]
-    
+
+    @bear_jax_typed
     def __post_init__(self):
         die_if_unbearable(self.truth_dir, Float[t.Tensor, "vect_sz 1"])
         truth_dir_norm = t.linalg.vector_norm(self.truth_dir).item()
@@ -44,7 +44,7 @@ class DirVectors:
         return cls(ttpd_probe.truth_dir, ttpd_probe.polarity_dir)
 
 
-@beartype
+@bear_jax_typed
 def learn_directions_for_dset(
         train_activs: Float[t.Tensor, "n_t_records vect_sz"],
         train_truth_labels: Float[t.Tensor, "n_t_records 1"],
@@ -89,7 +89,7 @@ class ReconLosses:
     validation_mean_activ_and_t_p_dirs_loss_on_validation: float
 
 
-@beartype
+@bear_jax_typed
 def record_count_normalized_recon_loss(
         activations_data: Float[t.Tensor, "n_records vect_sz"], truth_labels: Float[t.Tensor, "n_records 1"],
         polarity_labels: Float[t.Tensor, "n_records 1"], estimated_vects: DirVectors,
@@ -109,7 +109,7 @@ def record_count_normalized_recon_loss(
     return loss_per_record_with_just_mean_activ, loss_per_record
 
 
-@beartype
+@bear_jax_typed
 def compute_recon_losses(
         dir_vects_from_train: DirVectors, train_data: DataComponents, val_data: DataComponents) -> ReconLosses:
     assert is_binary(train_data.truth_labels), "Not all train-set truth labels are 1 or 0"

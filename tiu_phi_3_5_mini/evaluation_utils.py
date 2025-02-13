@@ -2,15 +2,14 @@ import json
 
 import torch
 from jaxtyping import Float
-from beartype import beartype
 
-from logging_setup import create_logger
-from phi_3_5_probe import ProbesForScenario
+from .logging_setup import create_logger
+from .phi_3_5_probe import ProbesForScenario
 
 import numpy as np
 from dataclasses import dataclass
 
-from utils import is_binary
+from .utils import is_binary, bear_jax_typed
 
 logger = create_logger(__name__)
 
@@ -277,7 +276,7 @@ class MetricsForDatasetProbes:
         return combined
 
 
-@beartype
+@bear_jax_typed
 def evaluate_classifier_performance(probes: ProbesForScenario, activations: Float[torch.Tensor, "n_recs act_sz"],
                                     truth_labels: Float[torch.Tensor, "n_recs 1"], threshold=0.5
                                     ) -> MetricsForDatasetProbes:
