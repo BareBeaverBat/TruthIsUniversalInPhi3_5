@@ -43,7 +43,7 @@ def save_train_validation_splits(train_valid_splits_spec: dict[int, list[TrainVa
         json.dump({
             str(dset_idx): list(map(asdict, dset_split_specs))
             for dset_idx, dset_split_specs in train_valid_splits_spec.items()
-        }, f)  # todo add indent=2 when rerunning this with 20 splits, but revert that if resulting file is too huge
+        }, f)
 
 
 def load_train_validation_splits() -> dict[int, list[TrainValidationSplitsIdxs]]:
