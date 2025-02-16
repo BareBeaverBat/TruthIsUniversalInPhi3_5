@@ -8,9 +8,8 @@ from beartype.door import die_if_unbearable
 
 from .data_management import DataComponents
 from .logging_setup import create_logger
-from .phi_3_5_constants import hidden_state_size
-from .phi_3_5_probe import PolarityAwareTruthProbe
-from .utils import is_binary, is_bipolar, bear_jax_typed
+from .phi_3_5_constants import hidden_state_size, vect_norm_tol
+from .utils import is_binary, is_bipolar, float_eq, FloatLikeT, bear_jax_typed_with_independent_calls
 
 logger = create_logger(__name__)
 
@@ -28,31 +27,28 @@ class DirVectors:
     truth_dir: Float[t.Tensor, "vect_sz 1"]
     polarity_dir: Float[t.Tensor, "vect_sz 1"]
 
-    @bear_jax_typed
+    @bear_jax_typed_with_independent_calls
     def __post_init__(self):
         die_if_unbearable(self.truth_dir, Float[t.Tensor, "vect_sz 1"])
         truth_dir_norm = t.linalg.vector_norm(self.truth_dir).item()
-        if abs(truth_dir_norm - 1) > 1e-8:
+        if not float_eq(truth_dir_norm, 1, vect_norm_tol):
             raise ValueError(f"truth direction should have unit norm, instead: {truth_dir_norm}")
         die_if_unbearable(self.polarity_dir, Float[t.Tensor, "vect_sz 1"])
         polarity_dir_norm = t.linalg.vector_norm(self.polarity_dir).item()
-        if abs(polarity_dir_norm-1) > 1e-8:
-            raise ValueError(f"polarity direction should have unit norm, instead: {truth_dir_norm}")
-
-    @classmethod
-    def from_ttpd_probe(cls, ttpd_probe: PolarityAwareTruthProbe):
-        return cls(ttpd_probe.truth_dir, ttpd_probe.polarity_dir)
+        if not float_eq(polarity_dir_norm, 1, vect_norm_tol) and not float_eq(polarity_dir_norm, 0, vect_norm_tol):
+            raise ValueError(f"polarity direction should have unit norm or 0 norm, instead: {polarity_dir_norm}")
 
 
-@bear_jax_typed
+@bear_jax_typed_with_independent_calls
 def learn_directions_for_dset(
         train_activs: Float[t.Tensor, "n_t_records vect_sz"],
         train_truth_labels: Float[t.Tensor, "n_t_records 1"],
         train_polarity_labels: Float[t.Tensor, "n_t_records 1"]) -> DirVectors:
     assert is_bipolar(train_polarity_labels)
     assert is_binary(train_truth_labels)
-    if train_activs.shape[1] != hidden_state_size:
-        logger.warning(f"activations aren't from phi 3.5 mini because activation size {train_activs.shape[1]} is wrong")
+    vect_sz = train_activs.shape[1]
+    if vect_sz != hidden_state_size:
+        logger.warning(f"activations aren't from phi 3.5 mini because activation size {vect_sz} is wrong")
 
     train_bipolar_truth_labels = t.where(train_truth_labels == zero_t(), neg1_t(), train_truth_labels)
 
@@ -60,41 +56,57 @@ def learn_directions_for_dset(
 
     mean_train_activ: Float[t.Tensor, "vect_sz 1"] = train_activs.mean(dim=0, keepdim=True).T
     centered_activations_data = train_activs - mean_train_activ.T
-    Y: Float[t.Tensor, "n_records 2"] = t.cat(
-        (train_bipolar_truth_labels, train_bipolar_truth_labels * train_polarity_labels), dim=1)
-    jointly_learned_truth_polarity_dirs: Float[t.Tensor, "2 vect_sz"] = (
-            t.linalg.inv(Y.T @ Y) @ Y.T @ centered_activations_data)
-    truth_dir: Float[t.Tensor, "vect_sz 1"] = jointly_learned_truth_polarity_dirs[0, :, None]
+
+    # type annotations have to be repeated for the assignments/initializations because otherwise beartype won't check
+    truth_dir: Float[t.Tensor, "vect_sz 1"]
+    polarity_dir: Float[t.Tensor, "vect_sz 1"]
+
+    are_all_polarities_same = float_eq(train_polarity_labels.sum().abs().item(), train_polarity_labels.shape[0], 0.01)
+    if are_all_polarities_same:
+        Y: Float[t.Tensor, "n_records 1"] = train_bipolar_truth_labels
+        learned_truth_dir: Float[t.Tensor, "1 vect_sz"] = t.linalg.inv(Y.T @ Y) @ Y.T @ centered_activations_data
+        truth_dir: Float[t.Tensor, "vect_sz 1"] = learned_truth_dir.T
+        polarity_dir: Float[t.Tensor, "vect_sz 1"] = t.zeros((vect_sz, 1), device=train_activs.device)
+    else:
+        Y: Float[t.Tensor, "n_records 2"] = t.cat(
+            (train_bipolar_truth_labels, train_bipolar_truth_labels * train_polarity_labels), dim=1)
+
+        jointly_learned_truth_polarity_dirs: Float[t.Tensor, "2 vect_sz"] = (
+                t.linalg.inv(Y.T @ Y) @ Y.T @ centered_activations_data)
+        truth_dir: Float[t.Tensor, "vect_sz 1"] = jointly_learned_truth_polarity_dirs[0, :, None]
+        # following Bürger et al. in discarding jointly learned polarity direction
+
+        binary_polarity_labels: Float[t.Tensor, "n_records 1"] = t.where(
+            train_polarity_labels == neg1_t(), zero_t(), train_polarity_labels)
+        # following Bürger et al. in the choice of not doing regularization when training a polarity direction
+        polarity_lin_classif = LogisticRegression(penalty=None, fit_intercept=True)
+        polarity_lin_classif.fit(train_activs.numpy(), binary_polarity_labels.numpy())
+        polarity_dir: Float[t.Tensor, "vect_sz 1"] = t.from_numpy(polarity_lin_classif.coef_).T
+
     truth_dir = truth_dir / t.linalg.vector_norm(truth_dir)
-    # following Bürger et al. in discarding jointly learned polarity direction
-    
-    binary_polarity_labels: Float[t.Tensor, "n_records 1"] = t.where(
-        train_polarity_labels == neg1_t(), zero_t(), train_polarity_labels)
-    # following Bürger et al. in the choice of not doing regularization when training a polarity direction
-    polarity_lin_classif = LogisticRegression(penalty=None, fit_intercept=True)
-    polarity_lin_classif.fit(train_activs.numpy(), binary_polarity_labels.numpy())
-    polarity_dir: Float[t.Tensor, "vect_sz 1"] = t.from_numpy(polarity_lin_classif.coef_).T
-    polarity_dir = polarity_dir / t.linalg.vector_norm(polarity_dir)
+    polar_dir_norm = t.linalg.vector_norm(polarity_dir)
+    if polar_dir_norm.item() > 0:
+        polarity_dir = polarity_dir / polar_dir_norm
 
     return DirVectors(truth_dir, polarity_dir)
 
 
 @dataclass
 class ReconLosses:
-    train_mean_activ_loss_on_train: float
-    train_mean_activ_and_t_p_dirs_loss_on_train: float
-    train_mean_activ_loss_on_validation: float
-    train_mean_activ_and_t_p_dirs_loss_on_validation: float
-    validation_mean_activ_loss_on_validation: float
-    validation_mean_activ_and_t_p_dirs_loss_on_validation: float
+    train_mean_activ_loss_on_train: FloatLikeT
+    train_mean_activ_and_t_p_dirs_loss_on_train: FloatLikeT
+    train_mean_activ_loss_on_validation: FloatLikeT
+    train_mean_activ_and_t_p_dirs_loss_on_validation: FloatLikeT
+    validation_mean_activ_loss_on_validation: FloatLikeT
+    validation_mean_activ_and_t_p_dirs_loss_on_validation: FloatLikeT
 
 
-@bear_jax_typed
+@bear_jax_typed_with_independent_calls
 def record_count_normalized_recon_loss(
         activations_data: Float[t.Tensor, "n_records vect_sz"], truth_labels: Float[t.Tensor, "n_records 1"],
         polarity_labels: Float[t.Tensor, "n_records 1"], estimated_vects: DirVectors,
         mean_activation_to_use: Float[t.Tensor, "vect_sz 1"]
-) -> (float, float):
+) -> tuple[FloatLikeT, FloatLikeT]:
     assert is_bipolar(truth_labels), "Not all truth labels are 1 or -1"
     assert is_bipolar(polarity_labels), "Not all polarity labels are 1 or -1"
 
@@ -109,7 +121,7 @@ def record_count_normalized_recon_loss(
     return loss_per_record_with_just_mean_activ, loss_per_record
 
 
-@bear_jax_typed
+@bear_jax_typed_with_independent_calls
 def compute_recon_losses(
         dir_vects_from_train: DirVectors, train_data: DataComponents, val_data: DataComponents) -> ReconLosses:
     assert is_binary(train_data.truth_labels), "Not all train-set truth labels are 1 or 0"

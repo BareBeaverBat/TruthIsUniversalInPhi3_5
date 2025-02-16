@@ -9,7 +9,7 @@ from .phi_3_5_probe import ProbesForScenario
 import numpy as np
 from dataclasses import dataclass
 
-from .utils import is_binary, bear_jax_typed
+from .utils import is_binary, bear_jax_typed_with_independent_calls
 
 logger = create_logger(__name__)
 
@@ -276,7 +276,7 @@ class MetricsForDatasetProbes:
         return combined
 
 
-@bear_jax_typed
+@bear_jax_typed_with_independent_calls
 def evaluate_classifier_performance(probes: ProbesForScenario, activations: Float[torch.Tensor, "n_recs act_sz"],
                                     truth_labels: Float[torch.Tensor, "n_recs 1"], threshold=0.5
                                     ) -> MetricsForDatasetProbes:

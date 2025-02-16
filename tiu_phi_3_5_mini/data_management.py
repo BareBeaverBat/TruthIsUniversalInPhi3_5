@@ -12,7 +12,7 @@ from pandas.core.dtypes.common import is_integer_dtype
 from beartype.door import die_if_unbearable
 
 from .phi_3_5_constants import dsets_folder, finalized_activations_dir
-from .utils import bear_jax_typed
+from .utils import bear_jax_typed_with_independent_calls
 
 
 @dataclass
@@ -59,7 +59,7 @@ class DataComponents:
     truth_labels: Float[torch.Tensor, "_dset_sz 1"]
     polarity_labels: Float[torch.Tensor, "_dset_sz 1"]
 
-    @bear_jax_typed
+    @bear_jax_typed_with_independent_calls
     def __post_init__(self):
         die_if_unbearable(self.activations, Float[torch.Tensor, "dset_sz act_sz"])
         die_if_unbearable(self.truth_labels, Float[torch.Tensor, "dset_sz 1"])
@@ -151,7 +151,7 @@ class ActivationsDataSelector:
             self.all_dsets_activations[dset_idx] = lyr18_activations
         assert all([len(idxs_of_6way_topic) == 6 for idxs_of_6way_topic in self.dset_idxs_for_6way_topics.values()])
 
-    @bear_jax_typed
+    @bear_jax_typed_with_independent_calls
     def select_train_validation_for_scenario(self, scenario_dset_idxs: list[int], split_variant_idx: int
                                              ) -> tuple[DataComponents, DataComponents]:
         assert all([dset_idx in self.dsets_index_df.index for dset_idx in scenario_dset_idxs])

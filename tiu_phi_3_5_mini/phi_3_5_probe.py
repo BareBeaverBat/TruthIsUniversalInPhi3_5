@@ -13,8 +13,9 @@ import tqdm
 from .data_management import DataComponents
 from .direction_learning import learn_directions_for_dset
 from .logging_setup import create_logger
-from .phi_3_5_constants import hidden_state_size, device, probes_folder, baseline_probes_folder
-from .utils import is_binary, bear_jax_typed
+from .phi_3_5_constants import hidden_state_size, device, probes_folder, baseline_probes_folder, num_splits, \
+    calc_seeds_for_splits, vect_norm_tol
+from .utils import is_binary, greatest_power_of_two_below, float_eq, bear_jax_typed_with_independent_calls
 
 weight_decay_key = 'weight_decay'
 learn_rate_key = 'lr'
@@ -24,35 +25,37 @@ logger = create_logger(__name__)
 
 class PolarityAwareTruthProbe(nn.Module):
 
-    @bear_jax_typed
+    @bear_jax_typed_with_independent_calls
     def __init__(self, truth_dir: Float[torch.Tensor, "act_sz 1"], polarity_dir: Float[torch.Tensor, "act_sz 1"]):
         super().__init__()
         truth_dir_norm = torch.linalg.vector_norm(truth_dir).item()
-        assert abs(truth_dir_norm-1) < 1e-8, f"truth direction not unit norm, instead norm is {truth_dir_norm}"
+        assert float_eq(truth_dir_norm, 1, vect_norm_tol), f"truth direction norm is {truth_dir_norm} not unit"
         polarity_dir_norm = torch.linalg.vector_norm(polarity_dir).item()
-        assert abs(polarity_dir_norm-1) < 1e-8, f"polarity direction not unit norm, instead norm is {polarity_dir_norm}"
+        assert float_eq(polarity_dir_norm, 1, vect_norm_tol) or float_eq(polarity_dir_norm, 0, vect_norm_tol), \
+            f"polarity direction not unit norm or 0 norm, instead norm is {polarity_dir_norm}"
         self.activation_size = truth_dir.shape[0]
-        self.register_buffer('truth_dir', truth_dir)
-        self.register_buffer('polarity_dir', polarity_dir)
+        tp_transform: Float[torch.Tensor, "act_sz 2"] = torch.cat((truth_dir, polarity_dir), dim=1)
+        self.register_buffer('tp_transform', tp_transform)
 
-        self.output_w = nn.Linear(2, 1, bias=False)
+        self.output_w = nn.Linear(2, 1, bias=True)
         self.activ = nn.Sigmoid()
 
-    @bear_jax_typed
+    @bear_jax_typed_with_independent_calls
     def forward(self, x: Float[torch.Tensor, "batch act_sz"] | Float[torch.Tensor, "batch 2"],
                 is_already_projected=False):
-        projected_x: Float[torch.Tensor, "batch 2"]
-
-        if is_already_projected:
-            assert x.shape[1] == 2, f"{x.shape}"  # TODO test whether this assert is still needed after beartype added
-            projected_x = x
-        else:
-            assert self.activation_size == x.shape[1], f"{x.shape}"
-            truth_proj_mag = x @ self.truth_dir.T
-            polarity_proj_mag = x @ self.polarity_dir.T
-            projected_x: Float[torch.Tensor, "batch 2"] = torch.concat((truth_proj_mag, polarity_proj_mag), dim=1)
-
+        n_feats = x.shape[1]
+        assert ((not is_already_projected and n_feats == self.activation_size) or
+                (is_already_projected and n_feats == 2)), f"{is_already_projected}, {n_feats}, {self.activation_size}"
+        projected_x: Float[torch.Tensor, "batch 2"] = x if is_already_projected else x @ self.tp_transform
         return self.activ(self.output_w(projected_x))
+
+    @property
+    def truth_dir(self) -> Float[torch.Tensor, "act_sz 1"]:
+        return self.tp_transform[:, 0:1]
+
+    @property
+    def polarity_dir(self) -> Float[torch.Tensor, "act_sz 1"]:
+        return self.tp_transform[:, 1:2]
 
 
 class LinearProbe(nn.Module):
@@ -60,12 +63,11 @@ class LinearProbe(nn.Module):
         super().__init__()
         self.activation_size = activation_size
 
-        self.output_w = nn.Linear(self.activation_size, 1, bias=False)
+        self.output_w = nn.Linear(self.activation_size, 1, bias=True)
         self.activ = nn.Sigmoid()
 
-    def forward(self, x: Float[torch.Tensor, "batch act_sz"]):
-        assert 2 == x.ndim
-        assert self.activation_size == x.shape[1]
+    @bear_jax_typed_with_independent_calls
+    def forward(self, x: Float[torch.Tensor, "batch {self.activation_size}"]):
         return self.activ(self.output_w(x))
 
 
@@ -89,13 +91,13 @@ def shift_weight_decay_by(optimizer: torch.optim.Optimizer, offset: float):
         param_group[weight_decay_key] = offset + param_group[weight_decay_key]
 
 
-@bear_jax_typed
+@bear_jax_typed_with_independent_calls
 def train_probe(
         train_activs: Float[torch.Tensor, "n_t_recs act_sz"] | Float[torch.Tensor, "n_t_recs 2"],
         train_truth_labels: Float[torch.Tensor, "n_t_recs 1"],
         val_activs: Float[torch.Tensor, "n_v_recs act_sz"] | Float[torch.Tensor, "n_v_recs 2"],
         val_truth_labels: Float[torch.Tensor, "n_v_recs 1"],
-        probe: PolarityAwareTruthProbe | LinearProbe, probe_fwd_kwargs: dict[str, Any] = None):
+        probe: PolarityAwareTruthProbe | LinearProbe, seed_to_use: int, probe_fwd_kwargs: dict[str, Any] = None):
     """
     
     Credit to https://machinelearningmastery.com/building-a-binary-classification-truth_probe-in-pytorch/
@@ -111,27 +113,37 @@ def train_probe(
 
     assert is_binary(train_truth_labels), "Not all train-set truth labels are 1 or 0"
     assert is_binary(val_truth_labels), "Not all validation-set truth labels are 1 or 0"
-    assert train_activs.shape[1] == val_activs.shape[1]
+    n_data_features = train_activs.shape[1]
+    assert n_data_features == val_activs.shape[1]
     num_train = train_activs.shape[0]
     num_val = val_activs.shape[0]
 
     probe.to(device)
     
-    gpu_train_activs = train_activs.to(device)
-    gpu_train_labels = train_truth_labels.to(device)
+    orig_gpu_train_activs = train_activs.to(device)
+    orig_gpu_train_labels = train_truth_labels.to(device)
+
     gpu_val_activs = val_activs.to(device)
     gpu_val_labels = val_truth_labels.to(device)
+
+    torch_rng = torch.Generator(device=device)
+    torch_rng.manual_seed(seed_to_use)
     
-    batch_size_factor = 1/16 if num_train < 50 else 1/2 if num_train < 100 else 1 if num_train < 500 \
-        else 2 if num_train < 1_000 else 4
+    base_batch_size = 64
+    # Break the dataset into just 2-3 batches if there are only 2 variables, otherwise scale the batch size as large as
+    #  possible without making it too large for the GPU or the dataset size
+    batch_size_factor = ((greatest_power_of_two_below(num_train)//2) // base_batch_size) if n_data_features == 2 \
+        else (1/16 if num_train < 50 else 1/2 if num_train < 100 else 1 if num_train < 500 else 4 if num_train < 1_000
+              else 8)
+
     base_learning_rate = 0.0001
     base_learning_rate = base_learning_rate / batch_size_factor if batch_size_factor > 1 else base_learning_rate
     
     weight_decay = 0.03
 
     max_num_epochs = 1_048_576
-    
-    batch_size = int(64*batch_size_factor)
+
+    batch_size = int(base_batch_size * batch_size_factor)
     batch_start_idxs = torch.arange(0, num_train, batch_size).to(device)
     
     loss_fn = nn.BCELoss()
@@ -156,7 +168,7 @@ def train_probe(
     num_epochs_in_group = 1024
     
     #for larger epoch numbers, this will be displayed without softwrap in notepad++ on my laptop ~only if few < or ! prefixes on epoch losses, making epochs with those prefixes stand out more
-    num_epoch_losses_per_log_line=7
+    num_epoch_losses_per_log_line = 7
     
     def print_epoch_group_losses(latest_epoch: int, loss_change_over_group: float):
         log_msg_for_epoch_group = f"Val losses for {len(val_loss_msgs_for_epoch_group)} epochs up to epoch {latest_epoch} (delta of {loss_change_over_group}):\n"
@@ -173,8 +185,13 @@ def train_probe(
         probe.train()
         with tqdm.tqdm(batch_start_idxs, unit="batch", mininterval=0, disable=True) as bar:
             bar.set_description(f"Epoch {epoch}")
+            train_recs_permut = torch.randperm(num_train, generator=torch_rng, device=device)
+            gpu_train_activs = orig_gpu_train_activs[train_recs_permut]
+            gpu_train_labels = orig_gpu_train_labels[train_recs_permut]
+
             for start in bar:
-                batch_activs, batch_labels = gpu_train_activs[start:start+batch_size], gpu_train_labels[start:start+batch_size]
+                batch_activs = gpu_train_activs[start:start+batch_size]
+                batch_labels = gpu_train_labels[start:start+batch_size]
                 preds = probe(batch_activs, **probe_fwd_kwargs)
                 loss = loss_fn(preds, batch_labels)
                 optimizer.zero_grad()
@@ -269,7 +286,7 @@ def train_probe(
     probe.cpu()
 
 
-@bear_jax_typed
+@bear_jax_typed_with_independent_calls
 def train_probes_for_dset(
         output_subfolder: str, output_nm_prefix: str, split_variant_idx: int, train_data: DataComponents,
         val_data: DataComponents) -> ProbesForScenario:
@@ -287,19 +304,20 @@ def train_probes_for_dset(
     ttpd_probe = retrieval_result.ttpd_probe
     baseline_linear_probe = retrieval_result.baseline_linear_probe
 
+    assert split_variant_idx < num_splits, f"{split_variant_idx} >= {num_splits}"
+    seed_for_curr_split = calc_seeds_for_splits()[split_variant_idx]
+
     if not ttpd_probe:
         logger.info(f"training the layer18 probe for {num_train_records} records of data {output_nm_prefix} "
                     f"in the location {output_folder}")
         dset_dirs = learn_directions_for_dset(train_data.activations, train_data.truth_labels,
                                               train_data.polarity_labels)
 
-        projected_train_activs: Float[torch.Tensor, "n_t_recs 2"] = torch.cat(
-            (train_data.activations @ dset_dirs.truth_dir.T, train_data.activations @ dset_dirs.polarity_dir.T), dim=1)
-        projected_val_activs: Float[torch.Tensor, "n_v_recs 2"] = torch.cat(
-            (val_data.activations @ dset_dirs.truth_dir.T, val_data.activations @ dset_dirs.polarity_dir.T), dim=1)
         ttpd_probe = PolarityAwareTruthProbe(dset_dirs.truth_dir, dset_dirs.polarity_dir)
+        projected_train_activs: Float[torch.Tensor, "n_t_recs 2"] = train_data.activations @ ttpd_probe.tp_transform
+        projected_val_activs: Float[torch.Tensor, "n_v_recs 2"] = val_data.activations @ ttpd_probe.tp_transform
         train_probe(projected_train_activs, train_data.truth_labels, projected_val_activs, val_data.truth_labels,
-                    ttpd_probe, {"is_already_projected": True})
+                    ttpd_probe, seed_for_curr_split, {"is_already_projected": True})
         retrieval_result.ttpd_probe_save_location.parent.mkdir(parents=True, exist_ok=True)
         torch.save(ttpd_probe.state_dict(), retrieval_result.ttpd_probe_save_location)
 
@@ -308,7 +326,7 @@ def train_probes_for_dset(
                     f"the location {baseline_output_folder}")
         baseline_linear_probe = LinearProbe(activs_size)
         train_probe(train_data.activations, train_data.truth_labels, val_data.activations, val_data.truth_labels,
-                    baseline_linear_probe)
+                    baseline_linear_probe, seed_for_curr_split)
         retrieval_result.baseline_linear_probe_save_location.parent.mkdir(parents=True, exist_ok=True)
         torch.save(baseline_linear_probe.state_dict(), retrieval_result.baseline_linear_probe_save_location)
 
@@ -355,7 +373,9 @@ def try_load_dset_probes(dset_probes_folder: Path, dset_baseline_probes_folder: 
                                                        baseline_linear_probe_save_location)
 
     if ttpd_probe_save_location.exists():
-        ttpd_probe = PolarityAwareTruthProbe(torch.ones(activations_size, 1), torch.ones(activations_size, 1))
+        unit_norm_activ_vect = torch.ones(activations_size, 1)
+        unit_norm_activ_vect = unit_norm_activ_vect / torch.linalg.vector_norm(unit_norm_activ_vect)
+        ttpd_probe = PolarityAwareTruthProbe(unit_norm_activ_vect, unit_norm_activ_vect.clone())
         ttpd_probe_state_dict = torch.load(ttpd_probe_save_location, weights_only=True)
         ttpd_probe.load_state_dict(ttpd_probe_state_dict)
         retrieval_result.ttpd_probe = ttpd_probe

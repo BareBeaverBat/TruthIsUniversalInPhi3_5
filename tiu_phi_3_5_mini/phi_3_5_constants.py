@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import torch
@@ -6,6 +7,13 @@ hidden_state_size = 3072
 num_layers = 33
 
 seed = 1894327
+
+num_splits = 20
+
+
+def calc_seeds_for_splits(split_count=num_splits, base_seed=seed) -> list[int]:
+    return [int((base_seed+739*k)*(math.pi-2)**k) for k in range(split_count)]
+
 
 dsets_folder = Path("./true_false_datasets")
 
@@ -28,3 +36,5 @@ test_classification_metrics_path = analysis_results_folder / "test_metrics.json"
 
 separation_by_layer_analysis_path = analysis_results_folder / "separation_by_layer.csv"
 
+# vector norms are surprisingly noisy; checking e.g. if a vector is unit norm or zero norm requires wide tolerance
+vect_norm_tol = 1e-4
