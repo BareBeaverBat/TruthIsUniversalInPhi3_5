@@ -299,8 +299,10 @@ def train_probe(
         final_val_acc = (preds.round() == gpu_val_labels).float().mean().item()
     
     train_time_in_secs = time.time() - probe_train_start_ts
+    n_recs = num_train + num_val
+    num_secs_per_rec = train_time_in_secs / n_recs
     logger.info(f"Using best Epoch {best_epoch} out of {epoch}: Val Loss with best weights: {final_val_loss:.6e}, Val Acc with best weights: {final_val_acc:.12%}; Val loss with terminal epoch's weights: {val_loss:.6e}\n"
-                f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec with final learning rate {get_optimizer_val(optimizer, learn_rate_key):e} and final weight decay {get_optimizer_val(optimizer, weight_decay_key):.4f}, ending at epoch {epoch}"
+                f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec on a dataset with {n_recs:.3f} records, for a rate of {num_secs_per_rec} seconds per data record; final learning rate {get_optimizer_val(optimizer, learn_rate_key):e} and final weight decay {get_optimizer_val(optimizer, weight_decay_key):.4f}"
                 f"\nAfter the epoch {best_epoch} with the best loss {best_loss:.6e}, learning rate= {lr_at_best_loss:e} and weight decay={weight_decay_at_best_loss:.4f}; Before the best loss was achieved, the longest set of consecutive epoch groups with mostly stagnant or backsliding validation losses was of length {largest_num_consecutive_stall_heavy_epoch_groups_before_best_loss}")
     probe.cpu()
 
