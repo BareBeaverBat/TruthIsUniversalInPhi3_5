@@ -153,6 +153,9 @@ def train_probe(
     best_epoch = -1
     best_weights = None
     best_bias = None
+    lr_at_best_loss = -1
+    weight_decay_at_best_loss = -1
+    largest_num_consecutive_stall_heavy_epoch_groups_before_best_loss = -1
 
     val_loss = -1
     num_prev_losses_tracked = 10
@@ -177,7 +180,10 @@ def train_probe(
             log_msg_for_epoch_group += '; '.join(val_loss_msgs_for_epoch_group[line_idx:max_epoch_idx_in_line]) + '\n'
         logger.debug(log_msg_for_epoch_group)
         val_loss_msgs_for_epoch_group.clear()
-    
+
+    curr_num_consecutive_stall_heavy_epoch_groups = 0
+    largest_num_consecutive_stall_heavy_epoch_groups = 0
+
     probe_train_start_ts = time.time()
     logger.debug(f"starting to train probe on dataset of size {num_train} with validation set of size {num_val}")
     epoch = 0
@@ -216,16 +222,21 @@ def train_probe(
                                              f"{epoch}:{val_loss:.7e}")
         if not is_better:
             num_stalls_in_epoch_group += 1
-        
+
+        curr_lr = get_optimizer_val(optimizer, learn_rate_key)
+        curr_weight_decay = get_optimizer_val(optimizer, weight_decay_key)
         if epoch and epoch % num_epochs_in_group == 0:
             curr_avg_loss = np.mean(prev_few_losses)
             loss_delta_over_group = curr_avg_loss - prev_epoch_group_loss
             print_epoch_group_losses(epoch, loss_delta_over_group)
-            curr_lr = get_optimizer_val(optimizer, learn_rate_key)
+
             if epoch > 3*num_epochs_in_group:
                 if num_stalls_in_epoch_group > 0.7*num_epochs_in_group:
+                    curr_num_consecutive_stall_heavy_epoch_groups += 1
+                    if curr_num_consecutive_stall_heavy_epoch_groups > largest_num_consecutive_stall_heavy_epoch_groups:
+                        largest_num_consecutive_stall_heavy_epoch_groups = curr_num_consecutive_stall_heavy_epoch_groups
                     if optimizer.param_groups[0][weight_decay_key] < 0.2:
-                        shift_weight_decay_by(optimizer, 0.01)
+                        shift_weight_decay_by(optimizer, 0.02)
                         logger.warning(f"increasing weight decay to {get_optimizer_val(optimizer, weight_decay_key):.4f} at epoch {epoch} because (over last {num_epochs_in_group} timesteps) validation loss hasn't even been close to improving smoothly- more than 70% of the last {num_epochs_in_group} epochs have been stagnant")
                     elif loss_delta_over_group >= 0:
                         logger.warning(f"terminating run early at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and there have been so many mostly stagnant periods in earlier epoch groups that the weight decay has already been increased to its maximum")
@@ -236,14 +247,17 @@ def train_probe(
                                 loss_delta_over_group / (curr_avg_loss - best_loss) < 0.01):
                             scale_lr_by(optimizer, 1.3)
                             logger.info(f"at epoch {epoch}, the loss improvement over the previous {num_epochs_in_group} epochs was less than 1% of the difference between the best loss so far and the loss at the end of the previous {num_epochs_in_group} epochs, so increasing learning rate to {get_optimizer_val(optimizer, learn_rate_key):e}")
-                elif loss_delta_over_group < 0 and had_prev_epoch_group_been_improvement and curr_lr < base_learning_rate:
-                    # if it finally gets on a good trajectory, but only after many cuts-in-learning-rate
-                    #  /increases-in-weight-decay
-                    #  otherwise, it can spend literally hundreds of thousands of epochs making improvement in every
-                    #  1024-epoch group relative to the prior group and yet still have a loss above 0.1 after all of
-                    #  that time (because the updates were all way too small)
-                    scale_lr_by(optimizer, 1.2)
-                    logger.info(f"scaling learning rate up to {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and because most of the last {num_epochs_in_group} epochs were locally improving the validation loss")
+                else:
+                    curr_num_consecutive_stall_heavy_epoch_groups = 0
+                    if (loss_delta_over_group < 0 and had_prev_epoch_group_been_improvement
+                            and curr_lr < base_learning_rate):
+                        # if it finally gets on a good trajectory, but only after many cuts-in-learning-rate
+                        #  /increases-in-weight-decay
+                        #  otherwise, it can spend literally hundreds of thousands of epochs making improvement in every
+                        #  1024-epoch group relative to the prior group and yet still have a loss above 0.1 after all of
+                        #  that time (because the updates were all way too small)
+                        scale_lr_by(optimizer, 1.2)
+                        logger.info(f"scaling learning rate up to {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and because most of the last {num_epochs_in_group} epochs were locally improving the validation loss")
                     
                 if loss_delta_over_group >= 0 and not had_prev_epoch_group_been_improvement:
                     scale_lr_by(optimizer, 0.707)
@@ -262,13 +276,17 @@ def train_probe(
             best_epoch = epoch
             best_weights = probe.output_w.weight.clone().detach().cpu()
             best_bias = probe.output_w.bias.clone().detach().cpu() if probe.output_w.bias is not None else None
+            lr_at_best_loss = curr_lr
+            weight_decay_at_best_loss = curr_weight_decay
+            largest_num_consecutive_stall_heavy_epoch_groups_before_best_loss = (
+                largest_num_consecutive_stall_heavy_epoch_groups)
             
             if epoch > 100 and val_loss < 1e-14:
                 print_epoch_group_losses(epoch, 0)
                 logger.info(f"stopping early at epoch {epoch}!")
                 break
 
-    # restore truth_probe to use weights that resulted in best validation loss
+    # restore truth_probe to use weights that resulted in the best validation loss
     probe.output_w.weight.data.copy_(best_weights.to(device))
     if best_bias is not None:
         probe.output_w.bias.data.copy_(best_bias.to(device))
@@ -282,7 +300,8 @@ def train_probe(
     
     train_time_in_secs = time.time() - probe_train_start_ts
     logger.info(f"Using best Epoch {best_epoch} out of {epoch}: Val Loss with best weights: {final_val_loss:.6e}, Val Acc with best weights: {final_val_acc:.12%}; Val loss with terminal epoch's weights: {val_loss:.6e}\n"
-                f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec with final learning rate {get_optimizer_val(optimizer, learn_rate_key):e} and final weight decay {get_optimizer_val(optimizer, weight_decay_key):.4f}, ending at epoch {epoch}")
+                f"Training took {train_time_in_secs // 60} min, {train_time_in_secs % 60:.3f} sec with final learning rate {get_optimizer_val(optimizer, learn_rate_key):e} and final weight decay {get_optimizer_val(optimizer, weight_decay_key):.4f}, ending at epoch {epoch}"
+                f"\nAfter the epoch {best_epoch} with the best loss {best_loss:.6e}, learning rate= {lr_at_best_loss:e} and weight decay={weight_decay_at_best_loss:.4f}; Before the best loss was achieved, the longest set of consecutive epoch groups with mostly stagnant or backsliding validation losses was of length {largest_num_consecutive_stall_heavy_epoch_groups_before_best_loss}")
     probe.cpu()
 
 
