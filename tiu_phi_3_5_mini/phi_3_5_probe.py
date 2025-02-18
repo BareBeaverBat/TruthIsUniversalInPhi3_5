@@ -257,15 +257,15 @@ def train_probe(
                         #  1024-epoch group relative to the prior group and yet still have a loss above 0.1 after all of
                         #  that time (because the updates were all way too small)
                         scale_lr_by(optimizer, 1.2)
-                        logger.info(f"scaling learning rate up to {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and because most of the last {num_epochs_in_group} epochs were locally improving the validation loss")
+                        logger.info(f"scaling learning rate up from {curr_lr:e} to {get_optimizer_val(optimizer, learn_rate_key)} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and because most of the last {num_epochs_in_group} epochs were locally improving the validation loss")
                     
                 if loss_delta_over_group >= 0 and not had_prev_epoch_group_been_improvement:
                     scale_lr_by(optimizer, 0.707)
-                    logger.warning(f"shrinking learning rate to {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and previous epoch group hadn't improved the loss either")
+                    logger.warning(f"shrinking learning rate from {curr_lr:e} to {get_optimizer_val(optimizer, learn_rate_key)} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has increased by {loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and previous epoch group hadn't improved the loss either")
             
             if loss_delta_over_group < 0 and num_stalls_in_epoch_group < 50:
                 scale_lr_by(optimizer, 1.2)
-                logger.info(f"scaling learning rate up to {curr_lr:e} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and last {num_epochs_in_group} epochs have included a minimal number of stagnant or backsliding epochs")
+                logger.info(f"scaling learning rate up from {curr_lr:e} to {get_optimizer_val(optimizer, learn_rate_key)} at epoch {epoch} because loss (avg'd over {num_prev_losses_tracked} timesteps) has improved by {-loss_delta_over_group:e} since {num_epochs_in_group} epochs ago and last {num_epochs_in_group} epochs have included a minimal number of stagnant or backsliding epochs")
             
             prev_epoch_group_loss = curr_avg_loss
             had_prev_epoch_group_been_improvement = loss_delta_over_group < 0

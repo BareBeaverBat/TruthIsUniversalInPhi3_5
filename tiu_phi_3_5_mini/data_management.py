@@ -64,6 +64,8 @@ class DataComponents:
         die_if_unbearable(self.activations, Float[torch.Tensor, "dset_sz act_sz"])
         die_if_unbearable(self.truth_labels, Float[torch.Tensor, "dset_sz 1"])
         die_if_unbearable(self.polarity_labels, Float[torch.Tensor, "dset_sz 1"])
+        assert self.activations.dtype == self.truth_labels.dtype == self.polarity_labels.dtype, \
+            f"{self.activations.dtype} {self.truth_labels.dtype} {self.polarity_labels.dtype}"
 
 
 class ActivationsDataSelector:
@@ -86,8 +88,8 @@ class ActivationsDataSelector:
                     self.train_valid_splits_spec.values()])
 
         # top-level key is the name of a topic that has 6 variants, second level key is one of those variant names
-        self.dset_idxs_for_6way_topics: dict[str, dict[Literal['affirm', 'neg', 'conj', 'disj', 'de', 'de_neg'], int]] \
-            = {}
+        self.dset_idxs_for_6way_topics: \
+            dict[str, dict[Literal['affirm', 'neg', 'conj', 'disj', 'de_affirm', 'de_neg'], int]] = {}
         self.idxs_for_other_dsets: dict[str, int] = {}
 
         self.act_sz = -1
@@ -123,7 +125,7 @@ class ActivationsDataSelector:
                 if is_neg:
                     self.dset_idxs_for_6way_topics[categ_nm]["de_neg" if in_german else "neg"] = dset_idx
                 elif in_german:
-                    self.dset_idxs_for_6way_topics[categ_nm]["de"] = dset_idx
+                    self.dset_idxs_for_6way_topics[categ_nm]["de_affirm"] = dset_idx
                 elif dset_dtls['is_conj']:
                     self.dset_idxs_for_6way_topics[categ_nm]["conj"] = dset_idx
                 elif dset_dtls['is_disj']:
@@ -191,6 +193,8 @@ class ActivationsDataSelector:
         scenario_validation_polarity_labels: Float[torch.Tensor, "combined_v_dset_sz 1"] = torch.cat(
             scenario_validation_polarity_labels_lst)
 
+        assert scenario_train_acts.dtype == scenario_validation_acts.dtype, \
+            f"{scenario_train_acts.dtype} {scenario_validation_acts.dtype}"
         return (DataComponents(scenario_train_acts, scenario_train_truth_labels, scenario_train_polarity_labels),
                 DataComponents(scenario_validation_acts, scenario_validation_truth_labels,
                                scenario_validation_polarity_labels))

@@ -38,6 +38,8 @@ class DirVectors:
         if not float_eq(polarity_dir_norm, 1, vect_norm_tol) and not float_eq(polarity_dir_norm, 0, vect_norm_tol):
             raise ValueError(f"polarity direction should have unit norm or 0 norm, instead: {polarity_dir_norm}")
 
+        assert self.truth_dir.dtype == self.polarity_dir.dtype, f"{self.truth_dir.dtype} {self.polarity_dir.dtype}"
+
 
 @bear_jax_typed_with_independent_calls
 def learn_directions_for_dset(
@@ -80,14 +82,15 @@ def learn_directions_for_dset(
             train_polarity_labels == neg1_t(), zero_t(), train_polarity_labels)
         # following Bürger et al. in the choice of not doing regularization when training a polarity direction
         polarity_lin_classif = LogisticRegression(penalty=None, fit_intercept=True)
-        polarity_lin_classif.fit(train_activs.numpy(), binary_polarity_labels.numpy())
-        polarity_dir: Float[t.Tensor, "vect_sz 1"] = t.from_numpy(polarity_lin_classif.coef_).T
+        polarity_lin_classif.fit(train_activs.numpy(), binary_polarity_labels.squeeze(1).numpy())
+        polarity_dir: Float[t.Tensor, "vect_sz 1"] = t.from_numpy(polarity_lin_classif.coef_).T.to(truth_dir.dtype)
 
     truth_dir = truth_dir / t.linalg.vector_norm(truth_dir)
     polar_dir_norm = t.linalg.vector_norm(polarity_dir)
     if polar_dir_norm.item() > 0:
         polarity_dir = polarity_dir / polar_dir_norm
 
+    assert train_activs.dtype == truth_dir.dtype, f"{train_activs.dtype} {truth_dir.dtype}"
     return DirVectors(truth_dir, polarity_dir)
 
 
