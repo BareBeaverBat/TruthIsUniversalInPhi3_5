@@ -96,12 +96,12 @@ def learn_directions_for_dset(
 
 @dataclass
 class ReconLosses:
-    train_mean_activ_loss_on_train: FloatLikeT
-    train_mean_activ_and_t_p_dirs_loss_on_train: FloatLikeT
-    train_mean_activ_loss_on_validation: FloatLikeT
-    train_mean_activ_and_t_p_dirs_loss_on_validation: FloatLikeT
-    validation_mean_activ_loss_on_validation: FloatLikeT
-    validation_mean_activ_and_t_p_dirs_loss_on_validation: FloatLikeT
+    train_mean_activ_loss_on_train: float
+    train_mean_activ_and_t_p_dirs_loss_on_train: float
+    train_mean_activ_loss_on_validation: float
+    train_mean_activ_and_t_p_dirs_loss_on_validation: float
+    validation_mean_activ_loss_on_validation: float
+    validation_mean_activ_and_t_p_dirs_loss_on_validation: float
 
 
 @bear_jax_typed_with_independent_calls
@@ -109,7 +109,7 @@ def record_count_normalized_recon_loss(
         activations_data: Float[t.Tensor, "n_records vect_sz"], truth_labels: Float[t.Tensor, "n_records 1"],
         polarity_labels: Float[t.Tensor, "n_records 1"], estimated_vects: DirVectors,
         mean_activation_to_use: Float[t.Tensor, "vect_sz 1"]
-) -> tuple[FloatLikeT, FloatLikeT]:
+) -> tuple[float, float]:
     assert is_bipolar(truth_labels), "Not all truth labels are 1 or -1"
     assert is_bipolar(polarity_labels), "Not all polarity labels are 1 or -1"
 
@@ -121,7 +121,7 @@ def record_count_normalized_recon_loss(
         np.square(np.linalg.norm(activations_data - mean_activation_to_use.T, axis=1)))
     # loss_per_record_normalized_for_dset = loss_per_record / loss_per_record_with_just_mean_activ
 
-    return loss_per_record_with_just_mean_activ, loss_per_record
+    return float(loss_per_record_with_just_mean_activ), float(loss_per_record)
 
 
 @bear_jax_typed_with_independent_calls
