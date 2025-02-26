@@ -275,7 +275,7 @@ class MetricsForDatasetProbes:
         )
         return combined
 
-
+@torch.inference_mode()
 @bear_jax_typed_with_independent_calls
 def evaluate_classifier_performance(probes: ProbesForScenario, activations: Float[torch.Tensor, "n_recs act_sz"],
                                     truth_labels: Float[torch.Tensor, "n_recs 1"], threshold=0.5
