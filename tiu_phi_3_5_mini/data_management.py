@@ -97,6 +97,7 @@ class ActivationsDataSelector:
         self.all_dsets_activations: dict[int, Float[torch.Tensor, "_dset_szs act_sz"]] = {}
         self.all_dsets_truth_labels: dict[int, Float[torch.Tensor, "_dset_szs 1"]] = {}
         self.all_dsets_polarity_labels: dict[int, Float[torch.Tensor, "_dset_szs 1"]] = {}
+        self.dset_record_counts: dict[int, int] = {}
         
         self._load_data()
 
@@ -109,8 +110,9 @@ class ActivationsDataSelector:
         """
         for dset_idx, dset_dtls in self.dsets_index_df.iterrows():
             assert isinstance(dset_idx, int)
-            categ_nm = dset_dtls["Categ_Folder"]
-            dset_file_nm = dset_dtls["Dataset_File"]
+            # I think these two assignments should automatically be typechecked at runtime by beartype
+            categ_nm: str = dset_dtls["Categ_Folder"]
+            dset_file_nm: str = dset_dtls["Dataset_File"]
             dset_nm = os.path.splitext(dset_file_nm)[0]
 
             is_neg = dset_dtls['is_negated']
@@ -135,6 +137,7 @@ class ActivationsDataSelector:
 
             dataset = pd.read_csv(dsets_folder / categ_nm / dset_file_nm)
             dset_size = dataset.shape[0]
+            self.dset_record_counts[dset_idx] = dset_size
             dset_truth_labels = torch.from_numpy(dataset['label'].to_numpy().astype(np.float32)[:, np.newaxis])
             self.all_dsets_truth_labels[dset_idx] = dset_truth_labels
 
