@@ -1,0 +1,280 @@
+[
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "cities",
+    "src_dset_idxs": [
+      4
+    ]
+  },
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "cities_conj",
+    "src_dset_idxs": [
+      5
+    ]
+  },
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "neg_cities",
+    "src_dset_idxs": [
+      7
+    ]
+  },
+  {
+    "result_folder_name": "relative_comparison",
+    "scenario_name": "larger_than",
+    "src_dset_idxs": [
+      25
+    ]
+  },
+  {
+    "result_folder_name": "relative_comparison",
+    "scenario_name": "smaller_than",
+    "src_dset_idxs": [
+      26
+    ]
+  },
+  {
+    "result_folder_name": "true_false",
+    "scenario_name": "common_claim_true_false",
+    "src_dset_idxs": [
+      31
+    ]
+  },
+  {
+    "result_folder_name": "true_false",
+    "scenario_name": "counterfact_true_false",
+    "src_dset_idxs": [
+      32
+    ]
+  },
+  {
+    "result_folder_name": "animal_class",
+    "scenario_name": "neg_conj",
+    "src_dset_idxs": [
+      3,
+      1
+    ]
+  },
+  {
+    "result_folder_name": "animal_class",
+    "scenario_name": "neg_disj",
+    "src_dset_idxs": [
+      3,
+      2
+    ]
+  },
+  {
+    "result_folder_name": "animal_class",
+    "scenario_name": "affirm_neg_conj_disj",
+    "src_dset_idxs": [
+      0,
+      3,
+      1,
+      2
+    ]
+  },
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "affirm_neg",
+    "src_dset_idxs": [
+      4,
+      7
+    ]
+  },
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "neg_conj",
+    "src_dset_idxs": [
+      7,
+      5
+    ]
+  },
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "neg_disj",
+    "src_dset_idxs": [
+      7,
+      6
+    ]
+  },
+  {
+    "result_folder_name": "cities",
+    "scenario_name": "affirm_neg_conj_disj",
+    "src_dset_idxs": [
+      4,
+      7,
+      5,
+      6
+    ]
+  },
+  {
+    "result_folder_name": "element_symb",
+    "scenario_name": "neg_conj",
+    "src_dset_idxs": [
+      11,
+      9
+    ]
+  },
+  {
+    "result_folder_name": "element_symb",
+    "scenario_name": "neg_disj",
+    "src_dset_idxs": [
+      11,
+      10
+    ]
+  },
+  {
+    "result_folder_name": "element_symb",
+    "scenario_name": "affirm_neg_conj_disj",
+    "src_dset_idxs": [
+      8,
+      11,
+      9,
+      10
+    ]
+  },
+  {
+    "result_folder_name": "facts",
+    "scenario_name": "affirm_neg",
+    "src_dset_idxs": [
+      12,
+      15
+    ]
+  },
+  {
+    "result_folder_name": "facts",
+    "scenario_name": "neg_conj",
+    "src_dset_idxs": [
+      15,
+      13
+    ]
+  },
+  {
+    "result_folder_name": "facts",
+    "scenario_name": "neg_disj",
+    "src_dset_idxs": [
+      15,
+      14
+    ]
+  },
+  {
+    "result_folder_name": "facts",
+    "scenario_name": "affirm_neg_conj_disj",
+    "src_dset_idxs": [
+      12,
+      15,
+      13,
+      14
+    ]
+  },
+  {
+    "result_folder_name": "inventors",
+    "scenario_name": "affirm_neg",
+    "src_dset_idxs": [
+      16,
+      19
+    ]
+  },
+  {
+    "result_folder_name": "inventors",
+    "scenario_name": "neg_conj",
+    "src_dset_idxs": [
+      19,
+      17
+    ]
+  },
+  {
+    "result_folder_name": "inventors",
+    "scenario_name": "neg_disj",
+    "src_dset_idxs": [
+      19,
+      18
+    ]
+  },
+  {
+    "result_folder_name": "inventors",
+    "scenario_name": "affirm_neg_conj_disj",
+    "src_dset_idxs": [
+      16,
+      19,
+      17,
+      18
+    ]
+  },
+  {
+    "result_folder_name": "sp_en_trans",
+    "scenario_name": "affirm_neg",
+    "src_dset_idxs": [
+      28,
+      27
+    ]
+  },
+  {
+    "result_folder_name": "sp_en_trans",
+    "scenario_name": "neg_conj",
+    "src_dset_idxs": [
+      27,
+      29
+    ]
+  },
+  {
+    "result_folder_name": "sp_en_trans",
+    "scenario_name": "neg_disj",
+    "src_dset_idxs": [
+      27,
+      30
+    ]
+  },
+  {
+    "result_folder_name": "sp_en_trans",
+    "scenario_name": "affirm_neg_conj_disj",
+    "src_dset_idxs": [
+      28,
+      27,
+      29,
+      30
+    ]
+  },
+  {
+    "result_folder_name": "cross_topic",
+    "scenario_name": "multi_topic_affirm_neg",
+    "src_dset_idxs": [
+      0,
+      12,
+      16,
+      3,
+      15,
+      19
+    ]
+  },
+  {
+    "result_folder_name": "cross_topic",
+    "scenario_name": "multi_topic_affirm_neg_conj",
+    "src_dset_idxs": [
+      0,
+      12,
+      16,
+      3,
+      15,
+      19,
+      1,
+      13,
+      17
+    ]
+  },
+  {
+    "result_folder_name": "cross_topic",
+    "scenario_name": "multi_topic_affirm_neg_plus_smaller_than_and_common_claim_t_f",
+    "src_dset_idxs": [
+      0,
+      12,
+      16,
+      3,
+      15,
+      19,
+      26,
+      31
+    ]
+  }
+]
