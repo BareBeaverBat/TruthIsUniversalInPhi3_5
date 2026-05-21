@@ -5,7 +5,7 @@ In this project, I reproduced some of the main results of the paper
 [Phi-3.5-mini](https://huggingface.co/microsoft/Phi-3.5-mini-instruct).
 In [v1](https://github.com/BareBeaverBat/TruthIsUniversalInPhi3_5/tree/v1) of the project, I completed that reproduction 
 without looking at the source code for Bürger et al.'s paper until it was time to write this report.  
-After looking at their source code and doing a retrospective, I updated the code, rerun the experiments, and updated
+After looking at their source code and doing a retrospective, I updated the code, reran the experiments, and updated
 the analysis as well as this report.
 
 I  
